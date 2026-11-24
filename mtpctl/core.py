@@ -1248,9 +1248,6 @@ class Manager:
     def base_path(self):
         return self.db.meta("web_base_path") or ""
 
-    def brand(self):
-        return self.db.meta("brand") or "console"
-
     def panel_domain(self):
         return self.db.meta("panel_domain") or ""
 

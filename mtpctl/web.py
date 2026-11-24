@@ -7,7 +7,6 @@ The panel UI itself (app.html) is handed out only after login via GET /api/app.
 """
 import hashlib
 import hmac
-import html
 import http.server
 import json
 import os
@@ -245,7 +244,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 page = f.read()
             with open(os.path.join(os.path.dirname(APP_PATH), "qrcode.js"), "rb") as f:
                 page = page.replace(b"/*QRCODE*/", f.read(), 1)
-            page = page.replace(b"{{BRAND}}", html.escape(m.brand()).encode())
             return self._send(200, page, "text/html; charset=utf-8")
         if p == ["password"] and method == "POST":
             b = self._body()

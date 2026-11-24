@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>Вход — {{BRAND}}</title>
+<title>mtpctl</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6fed'/%3E%3Cpath d='M9 10l6 6-6 6M17 22h6' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 :root{--bg:#f3f5f9;--card:#fff;--text:#1c2330;--muted:#6b7485;--line:#d9dee7;--accent:#2f6fed;--accent-h:#2259c7;--err-bg:#fdecec;--err:#b42318}
@@ -25,7 +25,7 @@ input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:tra
 .row{display:flex;justify-content:space-between;align-items:center;margin:14px 0 18px;font-size:13px}
 .row label{margin:0;font-weight:400;display:flex;gap:6px;align-items:center}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-button{width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button{width:100%;margin-top:14px;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
 button:hover{background:var(--accent-h)}button[disabled]{opacity:.7;cursor:default}
 .err{display:none;background:var(--err-bg);color:var(--err);border-radius:8px;padding:9px 12px;font-size:13px;margin-bottom:6px}
 .err.on{display:block}
@@ -41,23 +41,16 @@ try{if(localStorage.getItem('mtp.s')){document.documentElement.className='wait';
 <div class="box">
   <div class="logo">
     <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#2f6fed"/><path d="M9 10l6 6-6 6M17 22h6" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    {{BRAND}} console
+    mtpctl
   </div>
   <div class="card">
-    <h1>Вход в панель</h1>
-    <p class="sub">Введите пароль администратора</p>
     <div class="err" id="err" role="alert">Неверный пароль</div>
     <form id="f" method="post" action="login" autocomplete="off">
-      <label for="p">Пароль</label>
-      <input type="password" id="p" name="p" required>
-      <div class="row">
-        <label><input type="checkbox" name="r"> Запомнить меня</label>
-        <a href="#" id="fp">Забыли пароль?</a>
-      </div>
+      <input type="password" id="p" name="p" placeholder="Пароль" aria-label="Пароль" autocomplete="current-password" required autofocus>
       <button type="submit" id="b">Войти</button>
     </form>
   </div>
-  <div class="foot">© {{YEAR}} {{BRAND}}</div>
+  <div class="foot">© {{YEAR}} mtpctl</div>
 </div>
 <script>
 (function(){
@@ -79,12 +72,10 @@ try{if(localStorage.getItem('mtp.s')){document.documentElement.className='wait';
   f.addEventListener('submit',function(ev){
     ev.preventDefault();T0=Date.now();e.textContent='Неверный пароль';e.classList.remove('on');b.disabled=true;b.textContent='Проверка…';
     fetch('api/login',{method:'POST',credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest','Content-Type':'application/json'},
-      body:JSON.stringify({password:p.value,remember:f.r.checked})})
+      body:JSON.stringify({password:p.value,remember:true})})
     .then(function(r){if(!r.ok)throw 0;return boot();})
     .catch(function(){setTimeout(function(){b.disabled=false;b.textContent='Войти';p.value='';e.classList.add('on');p.focus();},Math.max(0,900-(Date.now()-T0)));});
   });
-  // заглушка: восстановления нет
-  document.getElementById('fp').addEventListener('click',function(ev){ev.preventDefault();e.textContent='Для восстановления доступа обратитесь к администратору';e.classList.add('on');});
 })();
 </script>
 </body>

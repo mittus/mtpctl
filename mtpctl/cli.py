@@ -17,7 +17,7 @@
   mtpctl server check [<S>]                    # применить и проверить сейчас (root)
   mtpctl online
   mtpctl traffic [<name>] [--server S] [--range 24h|7d|30d|12m]
-  mtpctl settings [--master-addr IP|DNS] [--brand NAME]
+  mtpctl settings [--master-addr IP|DNS] [--panel-domain DNS]
   mtpctl web access | reset [--random] | passwd | path [PATH|--random]
   mtpctl backup [FILE]                         # без FILE — рабочая копия /opt/mtpctl/backup/mtpctl.db
   mtpctl restore FILE                          # заменить базу копией и применить (root)
@@ -30,7 +30,6 @@ import argparse
 import contextlib
 import getpass
 import os
-import re
 import shutil
 import sqlite3
 import subprocess
@@ -362,15 +361,8 @@ def cmd_settings(m, a):
     if a.panel_domain is not None:
         m.set_panel_domain(a.panel_domain)
         _run_apply_if_root(None)
-    if a.brand is not None:
-        b = a.brand.strip()
-        if not re.match(r"^[A-Za-z0-9 ._-]{1,24}$", b):
-            raise MtpError("название панели: до 24 символов, латиница, цифры, пробел . _ -")
-        m.db.set_meta("brand", b)
-        core.request_apply("brand")
     print("адрес мастера для входов: %s" % (m.master_addr() or "не задан"))
     print("домен кабинета: %s" % (m.panel_domain() or "не задан — кабинет на доменах серверов"))
-    print("название панели (страница входа): %s" % m.brand())
     print("сервер по умолчанию для новых клиентов: %s" % (m.default_server_id() or "—"))
 
 
@@ -784,9 +776,8 @@ def main(argv=None):
     x.add_argument("--server")
     x.set_defaults(fn=cmd_traffic)
 
-    x = sub.add_parser("settings", help="адрес мастера, название панели")
+    x = sub.add_parser("settings", help="адрес мастера, домен кабинета")
     x.add_argument("--master-addr")
-    x.add_argument("--brand", help="название на странице входа")
     x.add_argument("--panel-domain", help="отдельный домен кабинета (A-запись на мастер); пусто — на доменах серверов")
     x.set_defaults(fn=cmd_settings)
 

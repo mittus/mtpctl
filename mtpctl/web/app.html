@@ -129,7 +129,7 @@ body.app{display:block;padding:0;align-items:initial;justify-content:initial;min
 </style>
 
 <div class="top">
-  <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#2f6fed"/><path d="M9 10l6 6-6 6M17 22h6" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>{{BRAND}} console</div>
+  <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#2f6fed"/><path d="M9 10l6 6-6 6M17 22h6" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>mtpctl</div>
   <nav class="tabs"><button class="tab on" data-v="clients">Клиенты</button><button class="tab" data-v="servers">Серверы</button><button class="tab" data-v="settings">Настройки</button></nav>
   <div class="sp"></div>
   <button class="btn sm" id="logout">Выйти</button>
@@ -511,7 +511,7 @@ function renderSettings(){
 
 /* ---------- shell */
 function show(v){view.dataset.v=v;document.querySelectorAll('.app .tab').forEach(function(t){t.classList.toggle('on',t.dataset.v===v);});
-  document.title=({clients:'Клиенты',servers:'Серверы',settings:'Настройки'}[v])+' — {{BRAND}} console';
+  document.title=({clients:'Клиенты',servers:'Серверы',settings:'Настройки'}[v])+' — mtpctl';
   if(v==='clients'){renderClients();load();}else if(v==='servers')renderServers();else renderSettings();}
 document.querySelectorAll('.app .tab').forEach(function(t){t.addEventListener('click',function(){show(t.dataset.v);});});
 document.getElementById('logout').addEventListener('click',function(){try{localStorage.removeItem('mtp.s');}catch(x){}api('POST','logout').then(function(){location.reload();},function(){location.reload();});});

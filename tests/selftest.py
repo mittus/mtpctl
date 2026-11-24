@@ -112,10 +112,10 @@ class T(unittest.TestCase):
         self.assertIn("proxy_set_header X-Base-Path /Secret123path/;", snip)
         self.assertIn("location /bg/", snip)
         self.assertNotIn("api/login", snip)                    # на корне больше нет формы входа
-        self.m.db.set_meta("brand", "acme<script>")
         page = agent.render_index(self.m)
-        self.assertIn("acmescript console", page)
+        self.assertIn("mtpctl", page)
         self.assertNotIn("{{", page)
+        self.assertNotIn("Забыли", page)
         self.e.add_server("A", "a.example.org", "198.51.100.7")
         self.assertEqual(self.m.panel_urls(), ["https://a.example.org/Secret123path/"])
 

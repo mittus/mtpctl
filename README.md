@@ -90,7 +90,7 @@ mtpctl client add <имя> [--server S[,S]] [--days N] [--devices N] [--quota 20
 mtpctl client list | show <имя> [--qr] | servers <имя> S[,S] | renew | limits | note | enable | disable | rotate | delete
 mtpctl online | traffic [<имя>] [--server S] [--range 24h|7d|30d|12m]
 mtpctl web access | reset | path [ПУТЬ|--random] | passwd
-mtpctl settings [--master-addr IP|DNS] [--panel-domain DNS] [--brand НАЗВАНИЕ]
+mtpctl settings [--master-addr IP|DNS] [--panel-domain DNS]
 mtpctl backup [файл] | restore <файл> | status | restart | log | update | uninstall
 ```
 
