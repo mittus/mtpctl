@@ -41,6 +41,8 @@ NGINX_SITES = "/etc/nginx/conf.d"
 NGINX_STREAM = "/etc/nginx/stream.d"
 MASK_CONF = os.path.join(NGINX_STREAM, "mtp-mask.conf")
 SNIPPET = "/etc/nginx/snippets/mtpanel.conf"
+WELCOME_DIR = "/var/www/mtpctl/welcome"
+STOCK_WELCOME = ["/usr/share/nginx/html/index.html", "/var/www/html/index.nginx-debian.html"]
 PANEL_SNIPPET = "/etc/nginx/snippets/mtpanel-direct.conf"
 PANEL_CONF = os.path.join(NGINX_SITES, "mtp-panel.conf")
 WEBROOT = "/var/www/mtpctl"
@@ -270,8 +272,11 @@ def render_snippet(m, direct=False):
         t = t.replace("{{BASE}}", core.check_base_path(base))
     else:                                     # кабинет не здесь — только заставка
         t = re.sub(r"(?s)# ---- кабинет.*?(?=# ---- заставка)", "", t)
-    if direct:                                # домен кабинета: кроме пути кабинета — «сайта нет»
-        t = re.sub(r"(?s)# ---- заставка.*", "# ---- всё остальное: стандартный 404 nginx\nlocation / { return 404; }\n", t)
+    if direct:                                # домен кабинета: как будто nginx только что поставили
+        t = re.sub(r"(?s)# ---- заставка.*", "# ---- всё остальное: стандартная страница свежего nginx и его 404\n"
+                   "location = / { root %s; try_files /index.html =404; }\n"
+                   "location = /index.html { root %s; }\n"
+                   "location / { return 404; }\n" % (WELCOME_DIR, WELCOME_DIR), t)
     return t.replace("{{GENERATED}}", "Сгенерировано mtpctl agent из mtpanel.conf.tmpl; не править.")
 
 
@@ -492,6 +497,11 @@ def write_sites(m, servers):
         for dom in os.listdir(site_root):
             if dom not in want:
                 shutil.rmtree(os.path.join(site_root, dom), ignore_errors=True)
+    welcome = os.path.join(WELCOME_DIR, "index.html")       # «Welcome to nginx!» для домена кабинета
+    text = next((t for t in map(_read, STOCK_WELCOME) if t and "Welcome to nginx" in t), None) or _tmpl("welcome.html")
+    if _read(welcome) != text:
+        _web_dir(WELCOME_DIR)
+        _write(welcome, text)
     panel = os.path.join(WEBROOT, "panel", "index.html")
     text = render_index(m)
     if _read(panel) != text:

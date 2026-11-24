@@ -1,7 +1,7 @@
 # {{GENERATED}}
 # Общее для сайтов mtpctl: домены серверов (mtpanel.conf) и домен кабинета (mtpanel-direct.conf).
 #   /            — заставка домена: фото дня (Wikimedia Commons), часы; своя у каждого домена
-#                  (на домене кабинета — стандартный 404 nginx);
+#                  (на домене кабинета — стандартная страница свежего nginx);
 #   /<путь>/     — кабинет: только на домене кабинета, а если он не задан — на доменах серверов.
 include mime.types;                      # не везде подключён в http {} (ico, svg, txt)
 default_type application/octet-stream;
@@ -35,7 +35,7 @@ location /{{BASE}}/api/ {
     client_max_body_size 64k;
 }
 
-# ---- заставка (на домене кабинета вместо неё — обычный 404 nginx, будто сайта нет)
+# ---- заставка (на домене кабинета вместо неё — «Welcome to nginx!», будто сервер только что поставили)
 error_page 404 /404.html;
 location /bg/ { root /var/www/mtpctl; expires 7d; }
 location = /404.html { internal; }

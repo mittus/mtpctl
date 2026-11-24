@@ -120,7 +120,8 @@ BASE=$NB
 x m1 'mtpctl settings --panel-domain panel.example.test' > /tmp/mtpctl-e2e-pd.log 2>&1 && ok "домен кабинета задан" || { bad "домен кабинета"; tail /tmp/mtpctl-e2e-pd.log; }
 chk "кабинет на своём домене (прямо на 443 мастера)" test "$(x e1 "curl -sk --resolve panel.example.test:443:$M1 https://panel.example.test/$BASE/ | grep -c api/login")" -ge 1
 chk "на домене сервера кабинета больше нет" test "$(code_of /$BASE/ 404)" = 404
-chk "домен кабинета без заставки: обычный 404 nginx" test "$(x e1 "curl -sk --resolve panel.example.test:443:$M1 https://panel.example.test/ | grep -c '<center>nginx</center>'")" -ge 1
+chk "домен кабинета: «Welcome to nginx!» на корне" test "$(x e1 "curl -sk --resolve panel.example.test:443:$M1 https://panel.example.test/ | grep -c 'Welcome to nginx'")" -ge 1
+chk "домен кабинета: прочие адреса — стандартная 404 nginx" test "$(x e1 "curl -sk --resolve panel.example.test:443:$M1 https://panel.example.test/robots.txt | grep -c '<center>nginx</center>'")" -ge 1
 x m1 "mtpctl settings --panel-domain ''" >/dev/null 2>&1
 chk "домен кабинета снят — кабинет снова на доменах серверов" test "$(code_of /$BASE/ 200)" = 200
 x m1 'mtpctl backup /root/b.db' >/dev/null && ok "backup в файл" || bad "backup в файл"

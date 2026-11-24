@@ -133,6 +133,7 @@ class T(unittest.TestCase):
         self.assertIn("location /Secret123path/api/", direct)
         self.assertNotIn("real_ip_header proxy_protocol", direct)
         self.assertIn("location / { return 404; }", direct)                             # без заставки
+        self.assertIn("location = / { root /var/www/mtpctl/welcome;", direct)          # «Welcome to nginx!»
         self.assertNotIn("/404.html", direct)
         self.assertNotIn("location /bg/", direct)
         self.assertIn("real_ip_header proxy_protocol", entry)
