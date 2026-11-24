@@ -1,0 +1,9 @@
+[Unit]
+Description=mtpctl agent trigger: changes made in the panel
+
+[Path]
+PathModified=/opt/mtpctl/data/apply.req
+Unit=mtpctl-agent.service
+
+[Install]
+WantedBy=paths.target

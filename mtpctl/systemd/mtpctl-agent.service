@@ -1,0 +1,9 @@
+[Unit]
+Description=mtpctl agent: apply servers from the database (telemt, ufw, nginx, certificates)
+After=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+UMask=0007
+ExecStart=/usr/bin/python3 -I -u /opt/mtpctl/app/cli.py apply
+TimeoutStartSec=20min

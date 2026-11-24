@@ -1,0 +1,22 @@
+[Unit]
+Description=mtpctl web panel backend
+After=network-online.target
+
+[Service]
+User=mtpctl
+Group=mtpctl
+UMask=0007
+Environment=MTPCTL_WEB_HOST=127.0.0.1
+Environment=MTPCTL_WEB_PORT=8090
+ExecStart=/usr/bin/python3 -I -u /opt/mtpctl/app/web.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/opt/mtpctl/data
+
+[Install]
+WantedBy=multi-user.target

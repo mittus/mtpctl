@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>404 — {{NAME}}</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="16x16">
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:{{FALLBACK}};color:#fff;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px}
+.bg{position:fixed;inset:0;background:{{BG}} center/cover no-repeat;filter:blur(18px) brightness(.55);transform:scale(1.08)}
+.box{position:relative}
+h1{font-size:clamp(72px,14vw,140px);margin:0;font-weight:{{WEIGHT}};letter-spacing:-.03em;line-height:1}
+p{font-size:18px;margin:10px 0 22px;opacity:.9}
+a{color:#fff;border:1px solid rgba(255,255,255,.6);border-radius:999px;padding:8px 18px;text-decoration:none}
+a:hover{background:rgba(255,255,255,.15)}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="box"><h1>404</h1><p>Такой страницы нет</p><a href="/">На главную</a></div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# {{DOMAIN}} — домен-заглушка сервера mtpctl. Сгенерировано mtpctl agent из mtp-site.conf.tmpl; не править.
+# HTTPS сюда приходит только через telemt («не-Telegram» -> 127.0.0.1:8446 с PROXY v1),
+# HTTP — через порт 80 входного хоста (Let's Encrypt и редирект на https).
+
+server {
+    listen 80;
+    server_name {{DOMAIN}};
+    root /var/www/mtpctl;
+    location /.well-known/acme-challenge/ { }
+    location / { return 301 https://{{DOMAIN}}$request_uri; }
+}
+
+server {
+    {{LISTEN}}
+    server_name {{DOMAIN}};
+    ssl_certificate     {{CERT}};
+    ssl_certificate_key {{KEY}};
+    root /var/www/mtpctl/site/{{DOMAIN}};       # заставка этого домена (agent: render_cover)
+    include snippets/mtpanel.conf;
+}

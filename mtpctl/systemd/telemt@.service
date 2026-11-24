@@ -1,0 +1,22 @@
+[Unit]
+Description=telemt MTProto proxy, mtpctl server %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=telemt
+Group=telemt
+ExecStart=/usr/local/bin/telemt run /etc/telemt/%i.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/etc/telemt /var/lib/telemt
+WorkingDirectory=/var/lib/telemt/%i
+
+[Install]
+WantedBy=multi-user.target

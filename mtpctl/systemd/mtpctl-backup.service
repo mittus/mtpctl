@@ -1,0 +1,7 @@
+[Unit]
+Description=mtpctl: refresh the working database copy /opt/mtpctl/backup/mtpctl.db
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 -I /opt/mtpctl/app/cli.py backup

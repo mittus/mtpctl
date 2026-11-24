@@ -1,0 +1,10 @@
+[Unit]
+Description=mtpctl agent: periodic apply and health checks
+
+[Timer]
+OnActiveSec=2min
+OnUnitActiveSec=10min
+Unit=mtpctl-agent.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,41 @@
+# {{GENERATED}}
+# Общее для сайтов mtpctl: домены серверов (mtpanel.conf) и домен кабинета (mtpanel-direct.conf).
+#   /            — заставка домена: фото дня (Wikimedia Commons), часы; своя у каждого домена;
+#   /<путь>/     — кабинет: только на домене кабинета, а если он не задан — на доменах серверов.
+include mime.types;                      # не везде подключён в http {} (ico, svg, txt)
+default_type application/octet-stream;
+index index.html;
+error_page 404 /404.html;
+server_tokens off;
+absolute_redirect off;                   # иначе в Location попадёт внутренний порт :8446
+
+# ---- realip (через telemt приходит PROXY v1; на домене кабинета соединение прямое)
+set_real_ip_from 127.0.0.1;
+real_ip_header proxy_protocol;
+# ---- общее
+
+ssl_protocols TLSv1.2 TLSv1.3;
+
+add_header X-Frame-Options DENY always;
+add_header X-Content-Type-Options nosniff always;
+add_header Referrer-Policy same-origin always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
+
+# ---- кабинет
+location = /{{BASE}} { return 301 /{{BASE}}/; }
+location = /{{BASE}}/ { root /var/www/mtpctl/panel; try_files /index.html =404; }
+location = /{{BASE}}/login { return 303 /{{BASE}}/?error=1; }       # форма без JS
+location /{{BASE}}/api/ {
+    proxy_pass http://127.0.0.1:8090/api/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Base-Path /{{BASE}}/;
+    proxy_read_timeout 60s;
+    client_max_body_size 64k;
+}
+
+# ---- заставка
+location /bg/ { root /var/www/mtpctl; expires 7d; }
+location = /404.html { internal; }
+location / { try_files $uri $uri/ =404; }

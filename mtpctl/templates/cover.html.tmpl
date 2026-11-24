@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{NAME}}</title>
+<meta name="description" content="{{NAME}} — фото дня">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="16x16">
+<style>
+:root{--accent:{{ACCENT}}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:{{FALLBACK}};color:#fff;font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+.bg{position:fixed;inset:0;background:center/cover no-repeat;transition:opacity 1.6s ease;opacity:0}
+.bg.on{opacity:1}
+.shade{position:fixed;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.25) 0%,rgba(0,0,0,0) 35%,rgba(0,0,0,0) 60%,rgba(0,0,0,.45) 100%)}
+.clock{position:fixed;{{POS}};text-shadow:0 2px 16px rgba(0,0,0,.35)}
+.time{font-size:clamp(64px,13vw,148px);font-weight:{{WEIGHT}};letter-spacing:-.02em;line-height:1}
+.date{font-size:clamp(17px,2.4vw,24px);margin-top:8px;opacity:.92}
+.name{position:fixed;top:22px;left:26px;font-weight:600;letter-spacing:.04em;opacity:.85;display:flex;gap:9px;align-items:center}
+.name i{width:10px;height:10px;border-radius:50%;background:var(--accent);display:inline-block}
+.credit{position:fixed;right:18px;bottom:14px;font-size:12px;opacity:.7;max-width:60vw;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.credit a{color:inherit;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="bg on" id="a"></div><div class="bg" id="b"></div><div class="shade"></div>
+<div class="name"><i></i>{{NAME}}</div>
+<div class="clock"><div class="time" id="t">--:--</div><div class="date" id="d"></div></div>
+<div class="credit" id="c"></div>
+<script>
+(function(){
+var P={{PHOTOS}},SLOT=300000,cur=-1,layer=0,L=[document.getElementById('a'),document.getElementById('b')];
+function pad(n){return (n<10?'0':'')+n;}
+function tick(){var d=new Date();document.getElementById('t').textContent=pad(d.getHours())+':'+pad(d.getMinutes());
+  var ds=d.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});document.getElementById('d').textContent=ds.charAt(0).toUpperCase()+ds.slice(1);}
+function show(){if(!P.length)return;var i=Math.floor(Date.now()/SLOT)%P.length;if(i===cur)return;cur=i;var p=P[i];
+  var img=new Image();img.onload=function(){layer^=1;L[layer].style.backgroundImage='url("/bg/'+p.f+'")';
+    L[layer].classList.add('on');L[layer^1].classList.remove('on');
+    var c=document.getElementById('c');c.textContent='';var a=document.createElement('a');a.href=p.s;a.rel='noopener';
+    a.textContent='Фото: '+p.a+(p.l?' · '+p.l:'');c.appendChild(a);
+    var n=new Image();n.src='/bg/'+P[(i+1)%P.length].f;};
+  img.src='/bg/'+p.f;}
+tick();show();setInterval(function(){tick();show();},1000);
+})();
+</script>
+</body>
+</html>

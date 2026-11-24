@@ -1,0 +1,17 @@
+# {{DOMAIN}} — домен кабинета mtpctl (A-запись на мастер, прямое соединение). Сгенерировано mtpctl agent; не править.
+server {
+    listen 80;
+    server_name {{DOMAIN}};
+    root /var/www/mtpctl;
+    location /.well-known/acme-challenge/ { }
+    location / { return 301 https://{{DOMAIN}}$request_uri; }
+}
+
+server {
+    {{LISTEN}}
+    server_name {{DOMAIN}};
+    ssl_certificate     {{CERT}};
+    ssl_certificate_key {{KEY}};
+    root /var/www/mtpctl/site/{{DOMAIN}};
+    include snippets/mtpanel-direct.conf;
+}
