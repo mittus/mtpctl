@@ -18,7 +18,7 @@
   mtpctl online
   mtpctl traffic [<name>] [--server S] [--range 24h|7d|30d|12m]
   mtpctl settings [--master-addr IP|DNS] [--brand NAME]
-  mtpctl web access | reset [--random] | path [PATH|--random] | passwd
+  mtpctl web access | reset [--random] | passwd | path [PATH|--random]
   mtpctl backup [FILE]                         # без FILE — рабочая копия /opt/mtpctl/backup/mtpctl.db
   mtpctl restore FILE                          # заменить базу копией и применить (root)
   mtpctl status | restart | log | update | uninstall
@@ -456,26 +456,24 @@ def _yes(prompt):
     return sys.stdin.isatty() and input(prompt + " [y/N]: ").strip().lower() in ("y", "yes", "д", "да")
 
 
-def _set_credentials(user=None, password=None):
+def _set_password(password=None):
     import web
-    user = user or core.random_string(10)
     password = password or core.random_string(16)
-    web.set_admin(user, password)
-    return user, password
+    web.set_password(password)
+    return password
 
 
 def _set_base_path(m, path=None):
     return m.set_base_path(path)
 
 
-def _access_block(m, user=None, password=None, title="Доступ к кабинету"):
+def _access_block(m, password=None, title="Доступ к кабинету"):
     line = "═" * 64
     urls = m.panel_urls()
     print(line)
     print("  " + title)
     print(line)
-    print("  Логин:          %s" % (user or m.auth().get("user") or "—"))
-    print("  Пароль:         %s" % (password or "(не менялся; сброс: mtpctl → 2)"))
+    print("  Пароль:         %s" % (password or "(не менялся; новый: mtpctl → 2)"))
     print("  Путь кабинета:  /%s/" % m.base_path())
     if m.panel_domain():
         print("  Домен кабинета: %s  (A-запись на этот хост)" % m.panel_domain())
@@ -488,12 +486,12 @@ def _access_block(m, user=None, password=None, title="Доступ к кабин
               "                  (или задайте свой домен: mtpctl settings --panel-domain tg.example.org)" % m.base_path())
     print(line)
     if password:
-        print("  ⚠ Сохраните логин и пароль: в базе хранится только хэш пароля.")
+        print("  ⚠ Сохраните пароль: в базе хранится только его хэш.")
         print(line)
 
 
 def cmd_setup(m, a):
-    """Установщик: база, логин/пароль, путь кабинета (как config_after_install в 3x-ui)."""
+    """Установщик: база, пароль и путь кабинета (как config_after_install в 3x-ui)."""
     if os.geteuid() != 0:
         raise MtpError("setup выполняется от root")
     new = not os.path.exists(core.DB_PATH)
@@ -508,19 +506,18 @@ def cmd_setup(m, a):
         pd = a.panel_domain or os.environ.get("MTPCTL_PANEL_DOMAIN")
         if pd:
             m.set_panel_domain(pd)
-        user = password = None
-        env_user, env_pw = os.environ.get("MTPCTL_USERNAME"), os.environ.get("MTPCTL_PASSWORD")
+        password = None
+        env_pw = os.environ.get("MTPCTL_PASSWORD")
         env_path = os.environ.get("MTPCTL_WEB_BASE_PATH")
-        if not m.auth().get("hash") or env_user or env_pw:
-            if not (env_user or env_pw) and _yes("Задать логин и пароль кабинета вручную? (иначе случайные)"):
-                env_user = _ask("Логин [случайный]: ")
+        if not m.auth().get("hash") or env_pw:
+            if not env_pw and _yes("Задать пароль кабинета вручную? (иначе случайный)"):
                 env_pw = _ask("Пароль, от 10 символов [случайный]: ")
-            user, password = _set_credentials(env_user or m.auth().get("user"), env_pw)
+            password = _set_password(env_pw)
         if not m.base_path() or env_path:
             if not env_path and _yes("Задать путь кабинета вручную? (иначе случайный, 18 символов)"):
                 env_path = _ask("Путь [случайный]: ")
             _set_base_path(m, env_path)
-        _access_block(m, user, password, "Мастер mtpctl установлен" if new else "Мастер mtpctl обновлён")
+        _access_block(m, password, "Мастер mtpctl установлен" if new else "Мастер mtpctl обновлён")
     finally:
         m.close()
 
@@ -530,23 +527,17 @@ def cmd_access(m, a):
 
 
 def cmd_web_reset(m, a):
-    if a.random:
-        user, password = _set_credentials()
-    else:
-        user = _ask("Логин [случайный]: ")
-        password = _ask("Пароль, от 10 символов [случайный]: ")
-        user, password = _set_credentials(user, password)
-    _access_block(m, user, password, "Логин и пароль сброшены (все сессии кабинета закрыты)")
+    password = _set_password(None if a.random else _ask("Пароль, от 10 символов [случайный]: "))
+    _access_block(m, password, "Новый пароль (все сессии кабинета закрыты)")
 
 
 def cmd_web_passwd(m, a):
     import web
-    user = a.user or m.auth().get("user") or input("логин: ").strip()
     p1 = getpass.getpass("новый пароль: ")
     p2 = getpass.getpass("ещё раз: ")
     if p1 != p2:
         raise MtpError("пароли не совпадают")
-    web.set_admin(user, p1)
+    web.set_password(p1)
     print("сохранено; все сессии кабинета сброшены")
 
 
@@ -630,8 +621,8 @@ def cmd_apply(m, a):
 # ---------------------------------------------------------------- menu (как x-ui)
 
 MENU = [
-    ("Доступ к кабинету (адреса, логин)", cmd_access),
-    ("Сбросить логин и пароль", cmd_web_reset),
+    ("Доступ к кабинету (адрес, путь)", cmd_access),
+    ("Новый пароль кабинета", cmd_web_reset),
     ("Сменить путь кабинета", cmd_web_path),
     ("Серверы", cmd_server_list),
     ("Клиенты", cmd_list),
@@ -679,7 +670,7 @@ def cmd_menu(m, a):
                     print()
                     _print_server(m, s)
             elif fn is cmd_web_reset:
-                if _yes("Сбросить логин и пароль кабинета?"):
+                if _yes("Сменить пароль кабинета?"):
                     fn(m, ns)
             elif fn is cmd_web_path:
                 if _yes("Сменить путь кабинета? Старая ссылка перестанет работать"):
@@ -799,13 +790,12 @@ def main(argv=None):
     x.add_argument("--panel-domain", help="отдельный домен кабинета (A-запись на мастер); пусто — на доменах серверов")
     x.set_defaults(fn=cmd_settings)
 
-    pw = sub.add_parser("web", help="кабинет: доступ, логин и пароль, путь")
+    pw = sub.add_parser("web", help="кабинет: доступ, пароль, путь")
     ws = pw.add_subparsers(dest="sub")
-    ws.add_parser("access", help="адреса кабинета и логин").set_defaults(fn=cmd_access)
-    x = ws.add_parser("passwd", help="сменить пароль")
-    x.add_argument("--user")
+    ws.add_parser("access", help="адрес и путь кабинета").set_defaults(fn=cmd_access)
+    x = ws.add_parser("passwd", help="сменить пароль (ввести свой)")
     x.set_defaults(fn=cmd_web_passwd)
-    x = ws.add_parser("reset", help="новые логин и пароль")
+    x = ws.add_parser("reset", help="новый пароль (случайный или свой)")
     x.add_argument("--random", action="store_true", help="случайные, без вопросов")
     x.set_defaults(fn=cmd_web_reset)
     x = ws.add_parser("path", help="сменить путь кабинета (/<путь>/)")
@@ -830,7 +820,7 @@ def main(argv=None):
     sub.add_parser("uninstall", help="удалить mtpctl с этого хоста").set_defaults(fn=cmd_uninstall, raw=True)
     sub.add_parser("menu", help="меню (как x-ui)").set_defaults(fn=cmd_menu)
 
-    x = sub.add_parser("setup", help="установщик: база, логин и пароль, путь кабинета (root)")
+    x = sub.add_parser("setup", help="установщик: база, пароль и путь кабинета (root)")
     x.add_argument("--addr", help="адрес мастера для входов")
     x.add_argument("--panel-domain", help="отдельный домен кабинета")
     x.set_defaults(fn=cmd_setup, raw=True)

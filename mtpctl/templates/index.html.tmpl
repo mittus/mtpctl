@@ -45,11 +45,9 @@ try{if(localStorage.getItem('mtp.s')){document.documentElement.className='wait';
   </div>
   <div class="card">
     <h1>Вход в панель</h1>
-    <p class="sub">Используйте учётную запись администратора</p>
-    <div class="err" id="err" role="alert">Неверный логин или пароль</div>
+    <p class="sub">Введите пароль администратора</p>
+    <div class="err" id="err" role="alert">Неверный пароль</div>
     <form id="f" method="post" action="login" autocomplete="off">
-      <label for="u">Логин</label>
-      <input type="text" id="u" name="u" required>
       <label for="p">Пароль</label>
       <input type="password" id="p" name="p" required>
       <div class="row">
@@ -64,7 +62,7 @@ try{if(localStorage.getItem('mtp.s')){document.documentElement.className='wait';
 <script>
 (function(){
   var H={'X-Requested-With':'XMLHttpRequest'},T0;
-  var f=document.getElementById('f'),e=document.getElementById('err'),b=document.getElementById('b'),p=document.getElementById('p'),u=document.getElementById('u');
+  var f=document.getElementById('f'),e=document.getElementById('err'),b=document.getElementById('b'),p=document.getElementById('p');
   function flag(on){try{on?localStorage.setItem('mtp.s','1'):localStorage.removeItem('mtp.s');}catch(x){}}
   function reveal(){document.documentElement.className='';}
   function boot(){
@@ -79,9 +77,9 @@ try{if(localStorage.getItem('mtp.s')){document.documentElement.className='wait';
     .catch(function(){reveal();});
   if(/[?&]error=1/.test(location.search)){e.classList.add('on');history.replaceState(null,'',location.pathname);}
   f.addEventListener('submit',function(ev){
-    ev.preventDefault();T0=Date.now();e.textContent='Неверный логин или пароль';e.classList.remove('on');b.disabled=true;b.textContent='Проверка…';
+    ev.preventDefault();T0=Date.now();e.textContent='Неверный пароль';e.classList.remove('on');b.disabled=true;b.textContent='Проверка…';
     fetch('api/login',{method:'POST',credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest','Content-Type':'application/json'},
-      body:JSON.stringify({user:u.value,password:p.value,remember:f.r.checked})})
+      body:JSON.stringify({password:p.value,remember:f.r.checked})})
     .then(function(r){if(!r.ok)throw 0;return boot();})
     .catch(function(){setTimeout(function(){b.disabled=false;b.textContent='Войти';p.value='';e.classList.add('on');p.focus();},Math.max(0,900-(Date.now()-T0)));});
   });

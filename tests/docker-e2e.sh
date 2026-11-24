@@ -53,10 +53,9 @@ x m1 'mkdir -p /root/gh/archive/refs/heads && cd /root && rm -rf mtpctl-master &
 x m1 "cd /tmp && MTPCTL_REPO_URL=http://127.0.0.1:8000 MTP_TELEMT_BIN=/src/tests/fake_telemt.py bash <(cat /src/install.sh) --addr $M1" \
     > /tmp/mtpctl-e2e-m1.log 2>&1 && ok "установка одной строкой" || { bad "установка одной строкой"; tail -30 /tmp/mtpctl-e2e-m1.log; }
 chk "исходники скачаны с «GitHub»" grep -q "скачиваю http://127.0.0.1:8000 (master)" /tmp/mtpctl-e2e-m1.log
-USER_=$(sed -n 's/^  Логин: *//p' /tmp/mtpctl-e2e-m1.log | head -1)
 PW=$(sed -n 's/^  Пароль: *//p' /tmp/mtpctl-e2e-m1.log | head -1)
 BASE=$(sed -n 's#^  Путь кабинета: */\([^/]*\)/#\1#p' /tmp/mtpctl-e2e-m1.log | head -1)
-chk "логин, пароль и путь сгенерированы (10/16/18)" test "${#USER_}" = 10 -a "${#PW}" = 16 -a "${#BASE}" = 18
+chk "пароль и путь сгенерированы (16/18), логина нет" test "${#PW}" = 16 -a "${#BASE}" = 18 -a -z "$(grep "Логин:" /tmp/mtpctl-e2e-m1.log)"
 chk "mtpctl-web работает" x m1 'systemctl is-active mtpctl-web'
 chk "агент: path и timer включены" x m1 'systemctl is-active mtpctl-agent.path mtpctl-agent.timer mtpctl-backup.timer'
 chk "всё в /opt/mtpctl, база mtpctl:mtpctl 660" x m1 '[ "$(stat -c %U:%G:%a /opt/mtpctl/data/mtpctl.db)" = mtpctl:mtpctl:660 ] && [ -f /opt/mtpctl/app/core.py ]'
@@ -85,24 +84,24 @@ chk "проверка мастера: DNS не настроен (ожидаем�
 echo "--- кабинет через вход (как снаружи)"
 cat > /tmp/mtpctl-e2e-client.sh <<'EOS'
 set -e
-D=$1; IP=$2; U=$3; PW=$4; B=$5
+D=$1; IP=$2; PW=$3; B=$4
 R="--resolve $D:443:$IP"
 C="curl -sk $R -H X-Requested-With:XMLHttpRequest -H Content-Type:application/json -c /tmp/j -b /tmp/j"
 curl -sk $R https://$D/ | grep -q 'id="t"' && ! curl -sk $R https://$D/ | grep -q api/login && echo COVER
 [ "$(curl -sk -o /dev/null -w '%{http_code}' $R https://$D/robots.txt)" = 200 ] && echo ROBOTS
 [ "$(curl -sk -o /dev/null -w '%{http_code} %{content_type}' $R https://$D/favicon.ico)" = "200 image/x-icon" ] && echo FAVICON
 [ "$(curl -sk -o /tmp/404 -w '%{http_code}' $R https://$D/wp-login.php)" = 404 ] && grep -q "Такой страницы нет" /tmp/404 && echo PAGE404
-[ "$(curl -sk -o /dev/null -w '%{http_code}' $R -H X-Requested-With:XMLHttpRequest -d "{\"user\":\"$U\",\"password\":\"$PW\"}" https://$D/api/login)" = 404 ] && echo NO_ROOT_API
+[ "$(curl -sk -o /dev/null -w '%{http_code}' $R -H X-Requested-With:XMLHttpRequest -d "{\"password\":\"$PW\"}" https://$D/api/login)" = 404 ] && echo NO_ROOT_API
 curl -sk $R https://$D/$B/ | grep -q api/login && echo PAGE
 [ "$(curl -sk -o /dev/null -w '%{http_code}' $R -H X-Requested-With:XMLHttpRequest https://$D/$B/api/clients)" = 404 ] && echo HIDDEN
-$C -d "{\"user\":\"$U\",\"password\":\"$PW\"}" -D /tmp/h https://$D/$B/api/login | grep -q '"ok": true' && echo LOGIN
+$C -d "{\"password\":\"$PW\"}" -D /tmp/h https://$D/$B/api/login | grep -q '"ok": true' && echo LOGIN
 grep -qi "set-cookie: sid=.*Path=/$B/;" /tmp/h && echo COOKIE_PATH
 $C -d '{"name":"e2e","devices":2}' https://$D/$B/api/clients | grep -q '"name": "e2e"' && echo CLIENT
 $C https://$D/$B/api/clients | grep -q "server=$IP" && echo LINKS
 $C -d '{"title":"Второй","domain":"two.example.test","entry_ip":"192.0.2.55"}' https://$D/$B/api/servers | grep -q slave_cmd && echo SERVER
 EOS
 docker cp /tmp/mtpctl-e2e-client.sh e1:/root/c.sh >/dev/null
-R=$(x e1 "bash /root/c.sh $D $E1 '$USER_' '$PW' '$BASE'" 2>&1)
+R=$(x e1 "bash /root/c.sh $D $E1 '$PW' '$BASE'" 2>&1)
 for k in COVER ROBOTS FAVICON PAGE404 NO_ROOT_API PAGE HIDDEN LOGIN COOKIE_PATH CLIENT LINKS SERVER; do
     case " $(echo $R) " in *" $k "*) ok "кабинет: $k";; *) bad "кабинет: $k ($R)";; esac
 done
@@ -121,7 +120,7 @@ BASE=$NB
 x m1 'mtpctl settings --panel-domain panel.example.test' > /tmp/mtpctl-e2e-pd.log 2>&1 && ok "домен кабинета задан" || { bad "домен кабинета"; tail /tmp/mtpctl-e2e-pd.log; }
 chk "кабинет на своём домене (прямо на 443 мастера)" test "$(x e1 "curl -sk --resolve panel.example.test:443:$M1 https://panel.example.test/$BASE/ | grep -c api/login")" -ge 1
 chk "на домене сервера кабинета больше нет" test "$(code_of /$BASE/ 404)" = 404
-chk "заставка и на домене кабинета" test "$(x e1 "curl -sk --resolve panel.example.test:443:$M1 https://panel.example.test/ | grep -c 'id=\"t\"'")" -ge 1
+chk "домен кабинета без заставки: обычный 404 nginx" test "$(x e1 "curl -sk --resolve panel.example.test:443:$M1 https://panel.example.test/ | grep -c '<center>nginx</center>'")" -ge 1
 x m1 "mtpctl settings --panel-domain ''" >/dev/null 2>&1
 chk "домен кабинета снят — кабинет снова на доменах серверов" test "$(code_of /$BASE/ 200)" = 200
 x m1 'mtpctl backup /root/b.db' >/dev/null && ok "backup в файл" || bad "backup в файл"
@@ -131,12 +130,12 @@ docker cp m1:/root/b.db /tmp/mtpctl-e2e-b.db >/dev/null && docker cp /tmp/mtpctl
 x m2 'ufw allow 22/tcp >/dev/null && ufw --force enable >/dev/null' && ok "ufw включён на m2" || bad "ufw на m2"
 x m2 "MTP_TELEMT_BIN=/src/tests/fake_telemt.py bash /src/install.sh master --restore /root/b.db --addr $M2" > /tmp/mtpctl-e2e-m2.log 2>&1 \
     && ok "install.sh master --restore" || { bad "install.sh master --restore"; tail -30 /tmp/mtpctl-e2e-m2.log; }
-chk "после restore логин не сброшен" grep -q "Пароль: *(не менялся" /tmp/mtpctl-e2e-m2.log
+chk "после restore пароль не сброшен" grep -q "Пароль: *(не менялся" /tmp/mtpctl-e2e-m2.log
 chk "клиент e2e на новом мастере" x m2 'mtpctl client show e2e | grep -q "tg://proxy"'
 chk "ufw: порт 8443 только для входа" x m2 "ufw status | grep -qE '^8443/tcp +ALLOW +$E1 +# mtpctl:s1'"
 x e1 "bash /src/install.sh slave --master $M2 --port 8443" >/dev/null 2>&1 && ok "вход перенаправлен на m2" || bad "вход на m2"
-R=$(x e1 "bash /root/c.sh $D $E1 '$USER_' '$PW' '$BASE' 2>&1")
-case " $(echo $R) " in *" LOGIN "*) ok "кабинет на m2: тот же логин, пароль и путь";; *) bad "кабинет на m2 ($R)";; esac
+R=$(x e1 "bash /root/c.sh $D $E1 '$PW' '$BASE' 2>&1")
+case " $(echo $R) " in *" LOGIN "*) ok "кабинет на m2: тот же пароль и путь";; *) bad "кабинет на m2 ($R)";; esac
 x m2 'mtpctl server check s1' > /tmp/mtpctl-e2e-check2.log 2>&1
 chk "m2: вход отвечает" grep -q "✓ вход $E1:443 отвечает" /tmp/mtpctl-e2e-check2.log
 chk "повторный install.sh master безопасен" x m2 "MTP_TELEMT_BIN=/src/tests/fake_telemt.py bash /src/install.sh"

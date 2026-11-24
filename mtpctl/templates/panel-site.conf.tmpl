@@ -12,6 +12,6 @@ server {
     server_name {{DOMAIN}};
     ssl_certificate     {{CERT}};
     ssl_certificate_key {{KEY}};
-    root /var/www/mtpctl/site/{{DOMAIN}};
+    root /var/www/mtpctl/panel;
     include snippets/mtpanel-direct.conf;
 }

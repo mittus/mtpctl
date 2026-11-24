@@ -132,7 +132,6 @@ body.app{display:block;padding:0;align-items:initial;justify-content:initial;min
   <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#2f6fed"/><path d="M9 10l6 6-6 6M17 22h6" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>{{BRAND}} console</div>
   <nav class="tabs"><button class="tab on" data-v="clients">Клиенты</button><button class="tab" data-v="servers">Серверы</button><button class="tab" data-v="settings">Настройки</button></nav>
   <div class="sp"></div>
-  <span class="who" id="who"></span>
   <button class="btn sm" id="logout">Выйти</button>
 </div>
 <main id="view"></main>
@@ -477,16 +476,24 @@ function renderSettings(){
         document.createTextNode(' — применится в течение минуты, старый перестанет работать. Сохраните новый адрес.'));pm.className='msg ok on';},
       function(e){pm.textContent=e.message;pm.className='msg err on';});}
   var cur=h('input',{type:'password',autocomplete:'current-password'}),nw=h('input',{type:'password',autocomplete:'new-password'}),nw2=h('input',{type:'password',autocomplete:'new-password'});
-  var msg=h('div',{class:'msg'});
-  var pw=h('div',{class:'card'},[h('div',{class:'form'},[field('Текущий пароль',cur),field('Новый пароль',nw,'не короче 10 символов'),field('Ещё раз',nw2),msg,
+  var msg=h('div',{class:'msg'}),gen=null;
+  function genPassword(n){var A='abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789',r=new Uint32Array(n),o='';
+    crypto.getRandomValues(r);for(var i=0;i<n;i++)o+=A[r[i]%A.length];return o;}
+  var pw=h('div',{class:'card'},[h('div',{class:'form'},[field('Текущий пароль',cur),
+    field('Новый пароль',h('div',{class:'chips'},[nw,h('button',{class:'btn sm',text:'Сгенерировать',onclick:function(){
+      gen=genPassword(16);nw.type='text';nw.value=gen;nw2.value=gen;nw2.parentNode.style.display='none';}}),
+      h('button',{class:'btn sm',text:'Копировать',onclick:function(){if(nw.value)copy(nw.value,'Пароль скопирован');}})]),'не короче 10 символов; «Сгенерировать» — 16 случайных символов'),
+    field('Ещё раз',nw2),msg,
     h('div',{},[h('button',{class:'btn pri',text:'Сменить пароль',onclick:function(){
       msg.className='msg';if(nw.value!==nw2.value){msg.textContent='Пароли не совпадают';msg.className='msg err on';return;}
+      if(gen&&nw.value===gen&&!window.confirm('Сохранили новый пароль? После смены нужно будет войти с ним.'))return;
       api('POST','password',{current:cur.value,new:nw.value}).then(function(){msg.textContent='Пароль изменён, войдите заново';msg.className='msg ok on';setTimeout(function(){location.reload();},1500);},
         function(e){msg.textContent=e.message;msg.className='msg err on';});}})])])]);
+  nw.style.maxWidth='260px';pw.firstChild.style.maxWidth='620px';
   view.replaceChildren(h('div',{class:'bar'},[h('h2',{text:'Настройки'})]),
     h('div',{class:'sect',style:'margin-top:8px'},[h('h3',{text:'Кабинет'}),h('div',{class:'card'},[h('div',{class:'form',style:'max-width:620px'},[
       field('Адрес кабинета',purl),
-      field('Домен кабинета',pdom,'Отдельный домен с A-записью на мастер — тогда кабинет открывается только на нём, а домены серверов показывают только заставку. Пусто — кабинет на доменах всех серверов. Сертификат выпустится сам.'),
+      field('Домен кабинета',pdom,'Отдельный домен с A-записью на мастер — тогда кабинет открывается только на нём (всё остальное на этом домене отвечает обычной 404 nginx, будто сайта нет), а домены серверов показывают только заставку. Пусто — кабинет на доменах всех серверов. Сертификат выпустится сам.'),
       h('div',{},[h('button',{class:'btn',text:'Сохранить домен',onclick:function(){savePanel({panel_domain:pdom.value.trim()},'Сменить домен кабинета? Текущий адрес перестанет работать.');}})]),
       field('Секретный путь',bpath,'Часть адреса после домена (как в 3x-ui). Без него кабинет не найти.'),
       h('div',{class:'chips'},[h('button',{class:'btn',text:'Сгенерировать новый',onclick:function(){savePanel({regenerate_path:true},'Сгенерировать новый путь? Текущий адрес кабинета перестанет работать.');}}),
@@ -508,7 +515,7 @@ function show(v){view.dataset.v=v;document.querySelectorAll('.app .tab').forEach
   if(v==='clients'){renderClients();load();}else if(v==='servers')renderServers();else renderSettings();}
 document.querySelectorAll('.app .tab').forEach(function(t){t.addEventListener('click',function(){show(t.dataset.v);});});
 document.getElementById('logout').addEventListener('click',function(){try{localStorage.removeItem('mtp.s');}catch(x){}api('POST','logout').then(function(){location.reload();},function(){location.reload();});});
-api('GET','session').then(function(j){document.getElementById('who').textContent=j.user;});
+
 show('clients');
 setInterval(function(){if(!document.hidden&&view.dataset.v==='clients'&&!document.querySelector('.app .modal-bg'))load().catch(function(){});},15000);
 })();

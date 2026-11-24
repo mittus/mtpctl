@@ -132,6 +132,9 @@ class T(unittest.TestCase):
         self.assertNotIn("Secret123path", entry)                                         # на серверах только заставка
         self.assertIn("location /Secret123path/api/", direct)
         self.assertNotIn("real_ip_header proxy_protocol", direct)
+        self.assertIn("location / { return 404; }", direct)                             # без заставки
+        self.assertNotIn("/404.html", direct)
+        self.assertNotIn("location /bg/", direct)
         self.assertIn("real_ip_header proxy_protocol", entry)
         site = agent.render_site("panel.example.org", panel=True)
         self.assertIn("server_name panel.example.org;", site)
@@ -360,7 +363,7 @@ class T(unittest.TestCase):
     # ---------------------------------------------------------------- panel API
     def test_web(self):
         a = self.e.add_server("A", "a.example.org", "198.51.100.7")
-        web.set_admin("admin", "secret-password-1")
+        web.set_password("secret-password-1")
         port = free_port()
         srv = web.Server(("127.0.0.1", port), web.Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -385,11 +388,11 @@ class T(unittest.TestCase):
 
             st, _, ct, _ = req("GET", "/api/clients")
             self.assertEqual((st, ct), (404, "text/html"))
-            st, _, _, _ = req("POST", "/api/login", {"user": "admin", "password": "wrong"})
+            st, _, _, _ = req("POST", "/api/login", {"password": "wrong"})
             self.assertEqual(st, 403)
-            st, ck, _, _ = req("POST", "/api/login", {"user": "admin", "password": "secret-password-1"}, csrf=False)
+            st, ck, _, _ = req("POST", "/api/login", {"password": "secret-password-1"}, csrf=False)
             self.assertEqual(st, 404)                        # без CSRF-заголовка — как будто ничего нет
-            st, ck, _, _ = req("POST", "/api/login", {"user": "admin", "password": "secret-password-1"})
+            st, ck, _, _ = req("POST", "/api/login", {"password": "secret-password-1"})
             self.assertEqual(st, 200)
             self.assertIn("Path=/panelpath123/;", ck)
             cookie = ck.split(";")[0]

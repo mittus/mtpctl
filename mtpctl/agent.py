@@ -270,6 +270,8 @@ def render_snippet(m, direct=False):
         t = t.replace("{{BASE}}", core.check_base_path(base))
     else:                                     # кабинет не здесь — только заставка
         t = re.sub(r"(?s)# ---- кабинет.*?(?=# ---- заставка)", "", t)
+    if direct:                                # домен кабинета: кроме пути кабинета — «сайта нет»
+        t = re.sub(r"(?s)# ---- заставка.*", "# ---- всё остальное: стандартный 404 nginx\nlocation / { return 404; }\n", t)
     return t.replace("{{GENERATED}}", "Сгенерировано mtpctl agent из mtpanel.conf.tmpl; не править.")
 
 
@@ -466,10 +468,7 @@ def write_sites(m, servers):
     pool = _bg_list()
     site_root = os.path.join(WEBROOT, "site")
     want = set()
-    domains = [s["domain"] for s in servers]
-    pd = _panel_domain(m)
-    if pd:
-        domains.append(pd)
+    domains = [s["domain"] for s in servers]          # у домена кабинета заставки нет
     for dom in domains:
         d = os.path.join(site_root, dom)
         want.add(dom)

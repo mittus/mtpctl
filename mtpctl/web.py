@@ -64,20 +64,18 @@ def load_auth():
         m.close()
 
 
-def set_admin(user, password):
-    if not core.NAME_RE.match(user or ""):
-        raise MtpError("логин: латиница, цифры, . _ -")
+def set_password(password):
+    """Вход в кабинет — только по паролю (логина нет). Смена пароля закрывает все сессии."""
+    password = password or ""
     if len(password) < 10:
         raise MtpError("пароль не короче 10 символов")
+    if len(password) > 200 or any(ord(ch) < 32 for ch in password):
+        raise MtpError("пароль: до 200 символов, без управляющих")
     m = core.Manager()
     try:
-        m.set_auth(user, hash_password(password))
+        m.set_auth("admin", hash_password(password))
     finally:
         m.close()
-
-
-# dummy hash so a wrong login costs the same time as a wrong password
-_DUMMY_HASH = hash_password(secrets.token_hex(8))
 
 
 # ---------------------------------------------------------------- sessions / throttling
@@ -85,7 +83,7 @@ _DUMMY_HASH = hash_password(secrets.token_hex(8))
 class State:
     def __init__(self):
         self.lock = threading.Lock()
-        self.sessions = {}      # sid -> {"user", "exp", "epoch"}
+        self.sessions = {}      # sid -> {"exp", "epoch"}
         self.fails = {}         # ip -> [ts...]
         self.fails_global = []  # [ts...]
 
@@ -179,7 +177,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         auth = load_auth()
         with STATE.lock:
             s = STATE.sessions.get(sid)
-            if not s or s["exp"] < now or s["epoch"] != auth.get("epoch") or s["user"] != auth.get("user"):
+            if not s or s["exp"] < now or s["epoch"] != auth.get("epoch"):
                 STATE.sessions.pop(sid, None)
                 return None
             return dict(s, sid=sid)
@@ -237,7 +235,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _route(self, m, method, p):
         if p == ["session"] and method == "GET":
-            return self._json(200, {"ok": True, "user": self.sess["user"]})
+            return self._json(200, {"ok": True})
         if p == ["logout"] and method == "POST":
             with STATE.lock:
                 STATE.sessions.pop(self.sess["sid"], None)
@@ -255,7 +253,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not verify_password(b.get("current", ""), auth.get("hash") or ""):
                 _fail_delay()
                 raise MtpError("текущий пароль неверен", status=403)
-            set_admin(b.get("user") or auth["user"], b.get("new", ""))
+            set_password(b.get("new", ""))
             return self._json(200, {"ok": True}, {"Set-Cookie": _cookie("", 0, _cookie_path(self))})
         if p == ["traffic"] and method == "GET":
             q = self._query()
@@ -376,7 +374,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             b = self._body()
         except MtpError:
             b = {}
-        user, pw, remember = str(b.get("user", "")), str(b.get("password", "")), bool(b.get("remember"))
+        pw, remember = str(b.get("password", "")), bool(b.get("remember"))
         # попытку засчитываем ДО проверки пароля: параллельные запросы не обойдут лимит
         with STATE.lock:
             STATE.prune(now)
@@ -389,9 +387,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 auth = load_auth()
                 if auth.get("hash"):
-                    user_ok = hmac.compare_digest(user.encode(), str(auth.get("user", "")).encode())
-                    pw_ok = verify_password(pw, auth["hash"] if user_ok else _DUMMY_HASH)
-                    ok = user_ok and pw_ok
+                    ok = verify_password(pw, auth["hash"])
             finally:
                 LOGIN_SLOTS.release()
         if not ok:
@@ -399,16 +395,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _fail_delay()
             if crowded:
                 time.sleep(3)
-            return self._json(403, {"ok": False, "error": "Неверный логин или пароль"})
+            return self._json(403, {"ok": False, "error": "Неверный пароль"})
         sid = secrets.token_urlsafe(32)
         ttl = REMEMBER_DAYS * 86400 if remember else SESSION_HOURS * 3600
         with STATE.lock:
             STATE.fails.pop(ip, None)
             if now in STATE.fails_global:
                 STATE.fails_global.remove(now)
-            STATE.sessions[sid] = {"user": auth["user"], "exp": now + ttl, "epoch": auth.get("epoch")}
+            STATE.sessions[sid] = {"exp": now + ttl, "epoch": auth.get("epoch")}
         sys.stderr.write("login ok from %s\n" % ip)
-        return self._json(200, {"ok": True, "user": auth["user"]},
+        return self._json(200, {"ok": True},
                           {"Set-Cookie": _cookie(sid, ttl if remember else None, _cookie_path(self))})
 
 

@@ -14,7 +14,7 @@
 #       bash install.sh slave --uninstall
 #     Порт и готовую команду показывает кабинет («Серверы» → «Подключение входа»).
 #
-#   Переменные: MTPCTL_USERNAME, MTPCTL_PASSWORD, MTPCTL_WEB_BASE_PATH — логин, пароль, путь кабинета
+#   Переменные: MTPCTL_PASSWORD, MTPCTL_WEB_BASE_PATH, MTPCTL_PANEL_DOMAIN — пароль, путь и домен кабинета
 #   (иначе случайные); MTPCTL_REPO_URL, MTPCTL_BRANCH — откуда скачивать исходники.
 #
 # Поддержка: Debian 10–13, Ubuntu 20.04+ (amd64/arm64).
@@ -369,7 +369,7 @@ master() {
 
     systemctl enable --now mtpctl-agent.path mtpctl-agent.timer mtpctl-backup.timer >/dev/null 2>&1
     systemctl enable mtpctl-web >/dev/null 2>&1
-    "$BIN" setup ${addr:+--addr "$addr"} ${pdomain:+--panel-domain "$pdomain"}   # логин/пароль/путь — как в 3x-ui
+    "$BIN" setup ${addr:+--addr "$addr"} ${pdomain:+--panel-domain "$pdomain"}   # пароль и путь кабинета — как в 3x-ui
     systemctl restart mtpctl-web
     info "применяю конфигурацию (telemt, ufw, nginx, сертификаты)…"
     "$BIN" apply || warn "применилось не всё — подробности выше и в mtpctl server list"
@@ -381,7 +381,7 @@ master() {
 Дальше:
   1. Добавьте первый сервер (вход):  mtpctl server add --title Знакомые --domain example.org --ip <IP входа>
   2. На входном хосте выполните команду, которую покажет mtpctl, и сделайте A-запись домена на его IP.
-  3. Кабинет откроется на https://<домен сервера>/<путь кабинета>/ — путь и логин выше.
+  3. Кабинет откроется на https://<домен сервера>/<путь кабинета>/ — путь и пароль выше.
 EOF
     elif [ -n "$restore" ]; then
         echo "Если адрес мастера поменялся, на каждом входе повторите команду из «Подключение входа»."
