@@ -12,6 +12,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -95,7 +96,7 @@ class T(unittest.TestCase):
         self.m.server_update(s["id"], extra_sni="")
         self.assertNotEqual(core.conf_hash(self.m.server(s["id"])), h)
         self.assertNotIn("{{", core.render_telemt_conf(self.m.server(s["id"])))
-        self.assertIn("--master 203.0.113.1 --port %d" % s["port"], self.m.slave_command(s))
+        self.assertIn("/install.sh) slave --master 203.0.113.1 --port %d" % s["port"], self.m.slave_command(s))
 
     def test_base_path_and_templates(self):
         self.assertEqual(len(core.random_string(18)), 18)
@@ -146,6 +147,22 @@ class T(unittest.TestCase):
         self.assertNotEqual(self.m.set_base_path(), old)
         self.m.set_panel_domain("")
         self.assertEqual(self.m.panel_urls(), ["https://a.example.org/%s/" % self.m.base_path()])
+
+    def test_versions_and_repo(self):
+        self.assertTrue(core.version_tuple("1.10.0") > core.version_tuple("1.9.9"))
+        self.assertEqual(core.version_tuple("garbage"), (0,))
+        src = os.path.join(core.LIB_DIR, "SOURCE")
+        self.assertFalse(os.path.exists(src))
+        self.assertEqual(core.raw_url("VERSION"), "https://raw.githubusercontent.com/mittus/mtpctl/master/VERSION")
+        try:
+            with open(src, "w") as f:
+                f.write("REPO_URL=http://127.0.0.1:8000\nBRANCH=dev\n")
+            self.assertEqual(core.raw_url("install.sh"), "http://127.0.0.1:8000/raw/dev/install.sh")
+        finally:
+            os.unlink(src)
+        self.m.db.set_meta("latest_version", "9.9.9")
+        self.m.db.set_meta("latest_checked", int(time.time()))
+        self.assertEqual(core.latest_version(self.m.db)[0], "9.9.9")                 # из кеша, без сети
 
     def test_covers(self):
         pool = [{"f": "%016x.jpg" % i, "a": "Автор <b>%d</b>" % i, "l": "CC0", "s": "https://commons.wikimedia.org/"}
@@ -407,7 +424,7 @@ class T(unittest.TestCase):
                                                          "entry_ip": "198.51.100.9", "extra_sni": "ya.ru"}, cookie)
             self.assertEqual(st, 201, raw)
             sid = json.loads(raw)["server"]["id"]
-            self.assertIn("install.sh slave --master 203.0.113.1", json.loads(raw)["slave_cmd"])
+            self.assertIn("install.sh) slave --master 203.0.113.1", json.loads(raw)["slave_cmd"])
             self.assertTrue(os.path.exists(os.path.join(TMP, "apply.req")))
             st, _, _, raw = req("PATCH", "/api/servers/" + sid, {"title": "Бэ", "default": True}, cookie)
             self.assertEqual(st, 200, raw)
@@ -430,6 +447,30 @@ class T(unittest.TestCase):
             self.assertEqual(core.check_db_file(p)["clients"], 1)
             st, _, _, raw = req("PATCH", "/api/settings", {"master_addr": "m.example.org"}, cookie)
             self.assertEqual(json.loads(raw)["settings"]["master_addr"], "m.example.org")
+            self.m.db.set_meta("latest_version", "99.0.0")
+            self.m.db.set_meta("latest_checked", int(time.time()))
+            st, _, _, raw = req("GET", "/api/version", cookie=cookie)
+            self.assertTrue(json.loads(raw)["version"]["update"])
+            st, _, _, raw = req("POST", "/api/update", cookie=cookie)
+            self.assertTrue(os.path.exists(os.path.join(TMP, "update.req")))
+
+            def upload(data, keep="1"):
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                c.request("POST", "/api/restore?keep_access=" + keep, data, {
+                    "X-Requested-With": "XMLHttpRequest", "Cookie": cookie, "Content-Type": "application/octet-stream"})
+                r = c.getresponse()
+                body = r.read()
+                c.close()
+                return r.status, json.loads(body)
+            st, j = upload(b"not a database at all" * 10)
+            self.assertEqual(st, 400)
+            self.assertFalse(os.path.exists(os.path.join(TMP, "restore.upload")))
+            with open(p, "rb") as f:                         # p — скачанная выше копия
+                st, j = upload(f.read(), keep="0")
+            self.assertEqual((st, j["info"]["clients"], j["keep_access"]), (200, 1, False))
+            self.assertTrue(os.path.exists(os.path.join(TMP, "restore.upload")))
+            with open(os.path.join(TMP, "restore.req")) as f:
+                self.assertEqual(json.load(f), {"keep_access": False})
             st, _, _, raw = req("DELETE", "/api/servers/" + sid, cookie=cookie)
             self.assertEqual(st, 200)
             st, _, _, raw = req("POST", "/api/password", {"current": "secret-password-1",

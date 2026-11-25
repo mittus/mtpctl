@@ -1,0 +1,9 @@
+[Unit]
+Description=mtpctl update trigger: "Update" button in the panel
+
+[Path]
+PathModified=/opt/mtpctl/data/update.req
+Unit=mtpctl-update.service
+
+[Install]
+WantedBy=paths.target

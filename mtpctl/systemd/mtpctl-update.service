@@ -1,0 +1,9 @@
+[Unit]
+Description=mtpctl: update the master from the source repository (install.sh update)
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/mtpctl
+ExecStart=/bin/bash /opt/mtpctl/app/install.sh update
+TimeoutStartSec=20min

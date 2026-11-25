@@ -20,7 +20,7 @@
   mtpctl settings [--master-addr IP|DNS] [--panel-domain DNS]
   mtpctl web access | reset [--random] | passwd | path [PATH|--random]
   mtpctl backup [FILE]                         # без FILE — рабочая копия /opt/mtpctl/backup/mtpctl.db
-  mtpctl restore FILE                          # заменить базу копией и применить (root)
+  mtpctl restore FILE [--access-from-backup]   # заменить базу копией без переустановки (root)
   mtpctl status | restart | log | update | uninstall
   mtpctl                                       # меню (в терминале)
   mtpctl setup | apply                         # служебные: установщик и агент (root)
@@ -395,44 +395,88 @@ def cmd_backup(m, a):
     print("%s: серверов %d, клиентов %d" % (dest, info["servers"], info["clients"]))
 
 
+ACCESS_KEYS = ("admin_user", "admin_hash", "admin_epoch", "web_base_path", "panel_domain", "master_addr")
+
+
+def restore_db(src, keep_access=True):
+    """Заменить базу копией (root): web остановлен на время замены, агент тоже ждёт.
+
+    keep_access — оставить текущие пароль, путь и домен кабинета и адрес мастера (иначе — из копии)."""
+    import time as _t
+    import agent
+    info = core.check_db_file(src)
+    db = core.DB_PATH
+    access = {}
+    if keep_access and os.path.exists(db):
+        cur = core.Store(db)
+        try:
+            access = {k: cur.meta(k) for k in ACCESS_KEYS}
+        finally:
+            cur.close()
+    subprocess.run(["systemctl", "stop", "mtpctl-web"], check=False)
+    try:
+        with agent.agent_lock():               # таймер агента не должен читать базу посреди замены
+            if os.path.exists(db):
+                keep = "%s.before-restore-%s" % (core.BACKUP_PATH, _t.strftime("%Y%m%d-%H%M%S"))
+                os.makedirs(os.path.dirname(keep), mode=0o700, exist_ok=True)
+                cur = core.Store(db)
+                try:
+                    cur.backup_to(keep)
+                finally:
+                    cur.close()
+                print("прежняя база: " + keep)
+            for suf in ("", "-wal", "-shm"):
+                if os.path.exists(db + suf):
+                    os.unlink(db + suf)
+            shutil.copyfile(src, db)
+            shutil.chown(db, "mtpctl", "mtpctl")
+            os.chmod(db, 0o660)
+            st = core.Store(db, create=True)      # догоняет схему, если копия старее
+            try:
+                st.x("UPDATE server_state SET applied=NULL, cert_try=NULL")   # конфиги пересоздать на этом хосте
+                with st.tx():
+                    for k, v in access.items():
+                        st.set_meta(k, v)
+            finally:
+                st.close()
+    finally:
+        subprocess.run(["systemctl", "start", "mtpctl-web"], check=False)
+    print("база восстановлена: серверов %d, клиентов %d%s" % (
+        info["servers"], info["clients"], "; доступ к кабинету оставлен прежним" if access else
+        "; пароль, путь и домен кабинета — из копии"))
+    agent.apply()
+
+
 def cmd_restore(m, a):
     if os.geteuid() != 0:
         raise MtpError("restore выполняется от root")
     info = core.check_db_file(a.file)
     _confirm(a, "Заменить текущую базу копией %s (серверов %d, клиентов %d)? Текущая будет сохранена рядом."
              % (a.file, info["servers"], info["clients"]))
-    import time as _t
-    import agent
-    db = core.DB_PATH
-    subprocess.run(["systemctl", "stop", "mtpctl-web"], check=False)
-    lock = agent.agent_lock()
-    lock.__enter__()                              # таймер агента не должен читать базу посреди замены
+    restore_db(a.file, keep_access=not a.access_from_backup)
+
+
+def pending_restore():
+    """Копия, загруженная через кабинет: data/restore.upload + data/restore.req (выполняет агент от root)."""
+    d = os.path.dirname(core.DB_PATH)
+    req, up = os.path.join(d, "restore.req"), os.path.join(d, "restore.upload")
+    if not os.path.exists(req):
+        return
+    import json as _json
     try:
-        if os.path.exists(db):
-            keep = "%s.before-restore-%s" % (core.BACKUP_PATH, _t.strftime("%Y%m%d-%H%M%S"))
-            os.makedirs(os.path.dirname(keep), mode=0o700, exist_ok=True)
-            src = core.Store(db)
-            try:
-                src.backup_to(keep)
-            finally:
-                src.close()
-            print("прежняя база: " + keep)
-        for suf in ("", "-wal", "-shm"):
-            if os.path.exists(db + suf):
-                os.unlink(db + suf)
-        shutil.copyfile(a.file, db)
-        shutil.chown(db, "mtpctl", "mtpctl")
-        os.chmod(db, 0o660)
-        st = core.Store(db, create=True)          # догоняет схему, если копия старее
-        try:
-            st.x("UPDATE server_state SET applied=NULL, cert_try=NULL")   # конфиги пересоздать на этом хосте
-        finally:
-            st.close()
+        with open(req, encoding="utf-8") as f:
+            opts = _json.load(f)
+    except (OSError, ValueError):
+        opts = {}
+    os.unlink(req)
+    if not os.path.exists(up):
+        return
+    try:
+        print("восстановление из копии, загруженной через кабинет")
+        restore_db(up, keep_access=bool(opts.get("keep_access", True)))
     finally:
-        lock.__exit__(None, None, None)
-        subprocess.run(["systemctl", "start", "mtpctl-web"], check=False)
-    print("база восстановлена; применяю:")
-    agent.apply()
+        with contextlib.suppress(OSError):
+            os.unlink(up)
 
 
 # ---------------------------------------------------------------- setup (installer), access, credentials
@@ -483,7 +527,7 @@ def _access_block(m, password=None, title="Доступ к кабинету"):
 
 
 def cmd_setup(m, a):
-    """Установщик: база, пароль и путь кабинета (как config_after_install в 3x-ui)."""
+    """Установщик: база, пароль и путь кабинета."""
     if os.geteuid() != 0:
         raise MtpError("setup выполняется от root")
     new = not os.path.exists(core.DB_PATH)
@@ -583,6 +627,14 @@ def _installer(*args):
 
 
 def cmd_update(m, a):
+    cur = core.installed_version()
+    latest, _ = core.latest_version(m.db, force=True)
+    print("установлена %s, в репозитории %s (%s)" % (cur, latest or "?", core.source_repo()[0]))
+    if a.check:
+        return
+    if latest and core.version_tuple(latest) <= core.version_tuple(cur) and not a.force:
+        print("обновлять нечего (принудительно: mtpctl update --force)")
+        return
     _installer("update")
 
 
@@ -593,7 +645,12 @@ def cmd_uninstall(m, a):
 def cmd_apply(m, a):
     import agent
     import time as _t
-    sid = m.server(a.server)["id"] if a.server else None
+    pending_restore()                          # до открытия базы: восстановление её заменяет
+    m = core.Manager()
+    try:
+        sid = m.server(a.server)["id"] if a.server else None
+    finally:
+        m.close()
     if getattr(a, "covers", False):
         agent.refresh_backgrounds(force=True)
     req = os.path.join(os.path.dirname(core.DB_PATH), "apply.req")
@@ -610,7 +667,7 @@ def cmd_apply(m, a):
         raise MtpError("с ошибками: " + "; ".join("%s: %s" % kv for kv in errs.items()))
 
 
-# ---------------------------------------------------------------- menu (как x-ui)
+# ---------------------------------------------------------------- menu
 
 MENU = [
     ("Доступ к кабинету (адрес, путь)", cmd_access),
@@ -624,6 +681,7 @@ MENU = [
     ("Перезапустить службы", cmd_restart),
     ("Журнал (последние 100 строк)", cmd_log),
     ("Обновить резервную копию", cmd_backup),
+    ("Восстановить базу из копии", "restore"),
     ("Обновить mtpctl", cmd_update),
     ("Удалить mtpctl", cmd_uninstall),
 ]
@@ -639,7 +697,7 @@ def _version():
 
 def cmd_menu(m, a):
     ns = argparse.Namespace(random=False, path=None, file=None, lines=100, server=None, no_checks=False,
-                            force_cert=True, yes=False)
+                            force_cert=True, yes=False, check=False, force=False, covers=False)
     while True:
         print("\n  mtpctl %s — MTProto-прокси (telemt)\n  %s" % (_version(), "─" * 40))
         for i, (title, _) in enumerate(MENU, 1):
@@ -661,6 +719,10 @@ def cmd_menu(m, a):
                 for s in m.servers():
                     print()
                     _print_server(m, s)
+            elif fn == "restore":
+                path = _ask("Путь к файлу копии (.db): ")
+                if path and _yes("Заменить базу копией %s? Пароль, путь и домен кабинета останутся текущими" % path):
+                    restore_db(path, keep_access=True)
             elif fn is cmd_web_reset:
                 if _yes("Сменить пароль кабинета?"):
                     fn(m, ns)
@@ -797,9 +859,11 @@ def main(argv=None):
     x = sub.add_parser("backup", help="резервная копия базы (без аргумента — рабочая копия %s)" % core.BACKUP_PATH)
     x.add_argument("file", nargs="?")
     x.set_defaults(fn=cmd_backup)
-    x = sub.add_parser("restore", help="восстановить базу из копии (root)")
+    x = sub.add_parser("restore", help="заменить базу копией без переустановки (root)")
     x.add_argument("file")
     x.add_argument("-y", "--yes", action="store_true")
+    x.add_argument("--access-from-backup", action="store_true",
+                   help="взять пароль, путь и домен кабинета из копии (по умолчанию остаются текущие)")
     x.set_defaults(fn=cmd_restore, raw=True)
 
     sub.add_parser("status", help="состояние служб").set_defaults(fn=cmd_status)
@@ -807,9 +871,12 @@ def main(argv=None):
     x = sub.add_parser("log", help="журнал кабинета, агента и telemt")
     x.add_argument("-n", "--lines", type=int, default=100)
     x.set_defaults(fn=cmd_log)
-    sub.add_parser("update", help="обновить mtpctl с GitHub").set_defaults(fn=cmd_update, raw=True)
+    x = sub.add_parser("update", help="обновить мастер из репозитория (код, telemt, конфиги)")
+    x.add_argument("--check", action="store_true", help="только показать версии")
+    x.add_argument("--force", action="store_true", help="переустановить, даже если версия та же")
+    x.set_defaults(fn=cmd_update)
     sub.add_parser("uninstall", help="удалить mtpctl с этого хоста").set_defaults(fn=cmd_uninstall, raw=True)
-    sub.add_parser("menu", help="меню (как x-ui)").set_defaults(fn=cmd_menu)
+    sub.add_parser("menu", help="меню").set_defaults(fn=cmd_menu)
 
     x = sub.add_parser("setup", help="установщик: база, пароль и путь кабинета (root)")
     x.add_argument("--addr", help="адрес мастера для входов")
@@ -820,7 +887,7 @@ def main(argv=None):
     x.add_argument("--force-cert", action="store_true")
     x.add_argument("--covers", action="store_true", help="докачать фото для заставок сейчас")
     x.add_argument("--server")
-    x.set_defaults(fn=cmd_apply)
+    x.set_defaults(fn=cmd_apply, raw=True)
 
     a = p.parse_args(argv)
     if not hasattr(a, "fn"):

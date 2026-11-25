@@ -34,6 +34,7 @@ FAIL_GLOBAL = 30
 CSRF_HEADER = "X-Requested-With"
 CSRF_VALUE = "XMLHttpRequest"
 MAX_BODY = 64 * 1024
+MAX_UPLOAD = 200 * 1024 * 1024
 
 
 # ---------------------------------------------------------------- admin credentials
@@ -278,6 +279,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "master_addr": m.master_addr(), "default_server": m.default_server_id(),
                 "panel_domain": m.panel_domain(), "base_path": m.base_path(), "panel_urls": m.panel_urls(),
                 "panel_checks": m.panel_checks()}})
+        if p == ["version"] and method == "GET":
+            latest, checked = core.latest_version(m.db, force=self._query().get("check") == "1")
+            cur = core.installed_version()
+            return self._json(200, {"ok": True, "version": {
+                "current": cur, "latest": latest, "checked": checked or None, "repo": core.source_repo()[0],
+                "update": bool(latest and core.version_tuple(latest) > core.version_tuple(cur)),
+                "running": os.path.exists(os.path.join(os.path.dirname(core.DB_PATH), "update.req"))}})
+        if p == ["update"] and method == "POST":
+            core.request_file("update.req", "%d\n" % time.time())       # mtpctl-update.path → install.sh update
+            return self._json(200, {"ok": True})
+        if p == ["restore"] and method == "POST":
+            return self._restore_upload(m)
         if p == ["backup"] and method == "GET":
             return self._backup(m)
         if p == ["install.sh"] and method == "GET":
@@ -350,6 +363,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if act == "reset-quota":
                     return self._json(200, {"ok": True, "client": m.reset_quota(name)})
         return self._not_found()
+
+    def _restore_upload(self, m):
+        """Копия базы из кабинета: проверить и оставить агенту (он заменит базу от root)."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if not 0 < n <= MAX_UPLOAD:
+            raise MtpError("файл копии: от 1 байта до %d МБ" % (MAX_UPLOAD // 1048576), status=413)
+        d = os.path.dirname(core.DB_PATH)
+        tmp = os.path.join(d, ".restore-%s.tmp" % secrets.token_hex(4))
+        try:
+            with open(tmp, "wb") as f:
+                left = n
+                while left:
+                    chunk = self.rfile.read(min(left, 1 << 20))
+                    if not chunk:
+                        raise MtpError("загрузка оборвалась")
+                    f.write(chunk)
+                    left -= len(chunk)
+            info = core.check_db_file(tmp)          # не база mtpctl / подделанные строки — отказ
+            os.replace(tmp, os.path.join(d, "restore.upload"))
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        keep = self._query().get("keep_access", "1") != "0"
+        core.request_file("restore.req", json.dumps({"keep_access": keep}))
+        core.request_apply("restore")
+        return self._json(200, {"ok": True, "info": info, "keep_access": keep})
 
     def _backup(self, m):
         import tempfile

@@ -449,9 +449,10 @@ function installDlg(n,fresh){
     fresh?h('div',{class:'msg ok on',text:'Сервер добавлен, на мастере для него уже поднимается прокси. Осталось подготовить входной хост.'}):null,
     h('ol',{class:'steps'},[
       h('li',{},['В DNS домена ',h('b',{text:n.domain}),' сделайте A-запись на ',h('b',{text:n.entry_ip}),'.']),
-      h('li',{},['Скопируйте на входной хост установщик и выполните от root:',h('div',{class:'cmd',text:cmd}),
+      h('li',{},['На входном хосте выполните от root (установщик скачается с GitHub):',h('div',{class:'cmd',text:cmd}),
         h('div',{class:'chips'},[h('button',{class:'btn sm pri',text:'Копировать команду',onclick:function(){copy(cmd);}}),h('button',{class:'btn sm',text:'Скачать install.sh',onclick:function(){download('install.sh','install.sh');}})]),
-        h('div',{class:'hint',text:'Debian 10–13 или Ubuntu 20.04+. Установщик ставит nginx и пересылает порты 443 и 80 на мастер; ключей и данных клиентов на входе нет.'})]),
+        h('div',{class:'hint',text:'Debian 10–13 или Ubuntu 20.04+. Ставит nginx и пересылает порты 443 и 80 на мастер; ключей и данных клиентов на входе нет. Если GitHub с хоста недоступен — скачайте install.sh и запустите его так же с теми же параметрами.'}),
+        h('div',{class:'hint',text:'Обновить вход позже: mtpctl-entry (переустановит, только если изменилась версия входа). Автоматически раз в неделю — добавьте к команде --auto-update.'})]),
       h('li',{},['Нажмите «Проверить» в карточке сервера (или подождите до 10 минут). Сертификат Let’s Encrypt выпустится сам, когда домен будет указывать на вход.'])])].filter(Boolean),[{text:'Закрыть'}],{focus:false,wide:true});}
 function download(path,fname){
   fetch('api/'+path,{headers:{'X-Requested-With':'XMLHttpRequest'},credentials:'same-origin'}).then(function(r){
@@ -469,6 +470,28 @@ function renderSettings(){
     purl.replaceChildren.apply(purl,(st.panel_urls||[]).map(function(u){return h('div',{},[h('a',{href:u,text:u})]);}));
     pck.replaceChildren();(st.panel_checks||[]).forEach(function(c){pck.appendChild(h('i',{class:c.status,text:CKI[c.status]||'?'}));pck.appendChild(h('span',{text:c.text}));});}
   api('GET','settings').then(function(j){fill(j.settings);});
+  var ver=h('div',{text:'…'}),um=h('div',{class:'msg'}),upd=h('button',{class:'btn pri',text:'Обновить',style:'display:none',onclick:function(){
+    if(!window.confirm('Обновить мастер до '+upd.dataset.v+'? Прокси и кабинет перезапустятся на несколько секунд.'))return;
+    upd.disabled=true;api('POST','update').then(function(){um.textContent='Обновление идёт — обычно 1–3 минуты; страница обновится сама.';um.className='msg ok on';
+      var was=ver.dataset.cur,t0=Date.now();(function poll(){setTimeout(function(){api('GET','version').then(function(j){
+        if(j.version.current!==was){location.reload();}else if(Date.now()-t0<600000)poll();else{um.textContent='Обновление не завершилось за 10 минут — смотрите mtpctl log на мастере.';um.className='msg err on';}},function(){if(Date.now()-t0<600000)poll();});},5000);})();},
+      function(e){um.textContent=e.message;um.className='msg err on';upd.disabled=false;});}});
+  function loadVer(force){api('GET','version'+(force?'?check=1':'')).then(function(j){var v=j.version;ver.dataset.cur=v.current;
+    ver.textContent='Установлена '+v.current+(v.latest?' · в репозитории '+v.latest:' · версию в репозитории узнать не удалось')+(v.checked?' (проверено '+ago(v.checked)+')':'');
+    upd.dataset.v=v.latest||'';upd.textContent='Обновить до '+(v.latest||'');upd.style.display=v.update&&!v.running?'':'none';
+    if(v.running){um.textContent='Обновление уже идёт…';um.className='msg ok on';}});}
+  loadVer(false);
+  var rf=h('input',{type:'file',accept:'.db,.sqlite,application/octet-stream',style:'max-width:300px'}),ra=h('input',{type:'checkbox'}),rm=h('div',{class:'msg'});
+  function doRestore(){var f=rf.files&&rf.files[0];rm.className='msg';
+    if(!f){rm.textContent='Выберите файл копии (.db)';rm.className='msg err on';return;}
+    if(!window.confirm('Заменить серверы, клиентов и трафик данными из «'+f.name+'»?'+(ra.checked?' Пароль, путь и домен кабинета тоже будут из копии.':'')))return;
+    rm.textContent='Загружаю…';rm.className='msg ok on';
+    fetch('api/restore?keep_access='+(ra.checked?'0':'1'),{method:'POST',credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest','Content-Type':'application/octet-stream'},body:f})
+      .then(function(r){return r.json().catch(function(){return {ok:false,error:'HTTP '+r.status};});}).then(function(j){
+        if(!j.ok)throw new Error(j.error||'ошибка');
+        rm.textContent='Копия принята (серверов '+j.info.servers+', клиентов '+j.info.clients+'). Мастер заменяет базу, кабинет перезапустится'+(j.keep_access?' — войдите заново с текущим паролем.':' — дальше вход по паролю и адресу из копии.');
+        setTimeout(function(){location.reload();},15000);})
+      .catch(function(e){rm.textContent=e.message;rm.className='msg err on';});}
   function savePanel(body,confirmText){
     if(!window.confirm(confirmText))return;pm.className='msg';
     api('PATCH','settings',body).then(function(j){fill(j.settings);var u=(j.settings.panel_urls||[])[0];
@@ -495,7 +518,7 @@ function renderSettings(){
       field('Адрес кабинета',purl),
       field('Домен кабинета',pdom,'Отдельный домен с A-записью на мастер — тогда кабинет открывается только на нём (на остальных адресах этого домена — стандартная «Welcome to nginx!», будто сервер только что поставили), а домены серверов показывают только заставку. Пусто — кабинет на доменах всех серверов. Сертификат выпустится сам.'),
       h('div',{},[h('button',{class:'btn',text:'Сохранить домен',onclick:function(){savePanel({panel_domain:pdom.value.trim()},'Сменить домен кабинета? Текущий адрес перестанет работать.');}})]),
-      field('Секретный путь',bpath,'Часть адреса после домена (как в 3x-ui). Без него кабинет не найти.'),
+      field('Секретный путь',bpath,'Часть адреса после домена. Без него кабинет не найти.'),
       h('div',{class:'chips'},[h('button',{class:'btn',text:'Сгенерировать новый',onclick:function(){savePanel({regenerate_path:true},'Сгенерировать новый путь? Текущий адрес кабинета перестанет работать.');}}),
         h('button',{class:'btn',text:'Сохранить свой',onclick:function(){savePanel({base_path:bpath.value.trim()},'Сменить путь кабинета? Текущий адрес перестанет работать.');}})]),
       pm,h('div',{},[h('div',{class:'hint',style:'margin:0 0 6px',text:'Проверки домена кабинета (агент, раз в 10 минут):'}),pck])])])]),
@@ -503,9 +526,15 @@ function renderSettings(){
       field('Куда входные хосты пересылают трафик',addr,'Подставляется в команду установки входа. Если указать DNS-имя, при переезде мастера достаточно поменять его A-запись: входы перечитывают её каждые 5 минут. После смены адреса уже установленные входы нужно переустановить.'),am,
       h('div',{},[h('button',{class:'btn pri',text:'Сохранить',onclick:function(){am.className='msg';
         api('PATCH','settings',{master_addr:addr.value.trim()}).then(function(j){addr.value=j.settings.master_addr||'';am.textContent='Сохранено';am.className='msg ok on';},function(e){am.textContent=e.message;am.className='msg err on';});}})])])])]),
+    h('div',{class:'sect'},[h('h3',{text:'Версия и обновление'}),h('div',{class:'card'},[h('div',{class:'form',style:'max-width:620px'},[ver,um,
+      h('div',{class:'chips'},[h('button',{class:'btn',text:'Проверить обновления',onclick:function(){loadVer(true);}}),upd]),
+      h('div',{class:'hint',style:'margin:0',text:'Обновление мастера: код, кабинет, telemt (если сменилась его версия) и конфиги всех серверов. Данные не трогаются, прокси перезапускается на несколько секунд, кабинет — тоже. Входы обновляются у себя командой mtpctl-entry.'})])])]),
     h('div',{class:'sect'},[h('h3',{text:'Резервная копия и перенос'}),h('div',{class:'card'},[h('div',{class:'form',style:'max-width:620px'},[
       h('div',{text:'В копии вся база: серверы, клиенты с ключами, история трафика, пароль кабинета. Храните её как пароль.'}),
       h('div',{class:'chips'},[h('button',{class:'btn pri',text:'Скачать копию базы',onclick:function(){download('backup','mtpctl.db');}}),h('button',{class:'btn',text:'Скачать install.sh',onclick:function(){download('install.sh','install.sh');}})]),
+      h('div',{class:'dz'},[h('h4',{text:'Восстановить из копии'}),h('div',{class:'chips'},[rf,h('button',{class:'btn danger',text:'Заменить базу копией',onclick:doRestore})]),
+        h('div',{class:'checks',style:'margin-top:8px'},[h('label',{},[ra,'Взять пароль, путь и домен кабинета из копии'])]),
+        h('div',{class:'hint',text:'Серверы, клиенты и трафик заменятся данными из копии (текущая база сохранится на мастере). Без галочки вход в кабинет остаётся прежним.'}),rm]),
       h('div',{class:'hint',style:'margin:0'},['Перенос мастера на другой хост: ',h('code',{text:'bash install.sh master --restore mtpctl.db'}),'. Рабочая копия на мастере — /opt/mtpctl/backup/mtpctl.db, обновляется раз в сутки.'])])])]),
     h('div',{class:'sect'},[h('h3',{text:'Пароль администратора'}),pw]));}
 

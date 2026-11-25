@@ -457,6 +457,77 @@ def _hidden(name):
     return name.startswith("_")       # служебные пользователи telemt (у экземпляра должен быть хоть один)
 
 
+# ---------------------------------------------------------------- version / source repository
+
+DEFAULT_REPO = "https://github.com/mittus/mtpctl"
+
+
+def installed_version():
+    try:
+        with open(os.path.join(LIB_DIR, "VERSION"), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return "dev"
+
+
+def source_repo():
+    """(repo_url, branch) the master was installed from (app/SOURCE, written by install.sh)."""
+    repo, branch = DEFAULT_REPO, "master"
+    try:
+        with open(os.path.join(LIB_DIR, "SOURCE"), encoding="utf-8") as f:
+            for line in f:
+                k, _, v = line.strip().partition("=")
+                if k == "REPO_URL" and v:
+                    repo = v
+                elif k == "BRANCH" and v:
+                    branch = v
+    except OSError:
+        pass
+    return repo.rstrip("/"), branch
+
+
+def raw_url(path):
+    """Raw file URL in the source repository (GitHub, or …/raw/<branch>/<path> for Gitea/GitLab/tests)."""
+    repo, branch = source_repo()
+    m = re.match(r"^https://github\.com/([^/]+/[^/]+?)(?:\.git)?$", repo)
+    if m:
+        return "https://raw.githubusercontent.com/%s/%s/%s" % (m.group(1), branch, path)
+    return "%s/raw/%s/%s" % (repo, branch, path)
+
+
+def version_tuple(v):
+    try:
+        return tuple(int(x) for x in re.findall(r"\d+", v or "")[:3]) or (0,)
+    except ValueError:
+        return (0,)
+
+
+def latest_version(db, force=False, max_age=12 * 3600):
+    """Latest VERSION in the source repository (cached in meta for 12 h). Returns (version|None, checked_ts)."""
+    checked = float(db.meta("latest_checked") or 0)
+    if not force and time.time() - checked < max_age:
+        return db.meta("latest_version"), checked
+    try:
+        req = urllib.request.Request(raw_url("VERSION"), headers={"User-Agent": "mtpctl/" + installed_version()})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            v = r.read(64).decode("ascii", "replace").strip()
+        if not re.match(r"^\d+(\.\d+){0,2}$", v):
+            raise ValueError(v)
+    except (OSError, ValueError):
+        return db.meta("latest_version"), checked
+    db.set_meta("latest_version", v)
+    db.set_meta("latest_checked", int(time.time()))
+    return v, time.time()
+
+
+def request_file(name, content=""):
+    """Leave a request for the root agent next to the database (apply/update/restore)."""
+    path = os.path.join(os.path.dirname(DB_PATH), name)
+    with open(path, "w") as f:
+        f.write(content)
+    return path
+
+
 def request_apply(reason="change"):
     """Wake the root agent (mtpctl-agent.path watches this file)."""
     path = os.path.join(os.path.dirname(DB_PATH), "apply.req")
@@ -753,7 +824,8 @@ class Manager:
         return self.db.meta("master_addr") or ""
 
     def slave_command(self, s):
-        return "bash install.sh slave --master %s --port %d" % (self.master_addr() or "<IP-мастера>", s["port"])
+        return "bash <(wget -qO- %s) slave --master %s --port %d" % (
+            raw_url("install.sh"), self.master_addr() or "<IP-мастера>", s["port"])
 
     def _resolve_servers(self, refs):
         out = []

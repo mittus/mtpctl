@@ -10,8 +10,9 @@
 #       bash install.sh uninstall       — удалить мастер (копия базы остаётся в /root)
 #
 #   Вход (хост, к которому подключаются клиенты; данных и ключей на нём нет):
-#       bash install.sh slave --master IP|DNS --port PORT
+#       bash install.sh slave --master IP|DNS --port PORT [--auto-update]
 #       bash install.sh slave --uninstall
+#       mtpctl-entry                     — обновить вход (скачивает свежий install.sh; --force — переустановить)
 #     Порт и готовую команду показывает кабинет («Серверы» → «Подключение входа»).
 #
 #   Переменные: MTPCTL_PASSWORD, MTPCTL_WEB_BASE_PATH, MTPCTL_PANEL_DOMAIN — пароль, путь и домен кабинета
@@ -36,6 +37,9 @@ DB=$DATA/mtpctl.db
 BIN=/usr/local/bin/mtpctl
 WEBROOT=/var/www/mtpctl
 SLAVE_CONF=/etc/nginx/stream.d/mtproxy.conf
+SLAVE_VERSION=1                              # поднимать, когда меняется то, что ставится на вход
+ENTRY_CONF=/etc/mtpctl-entry.conf            # параметры входа: мастер, порт, откуда обновляться
+ENTRY_BIN=/usr/local/sbin/mtpctl-entry       # обновление входа: скачать свежий install.sh и применить
 SELF="${BASH_SOURCE[0]}"
 # откуда ставили — туда же ходит update (форк остаётся форком)
 REPO_URL="${MTPCTL_REPO_URL:-$(sed -n 's/^REPO_URL=//p' "$APP/SOURCE" 2>/dev/null || true)}"
@@ -57,7 +61,8 @@ usage() { printf '%s\n' \
     "mtpctl installer" \
     "  bash install.sh [master] [--addr IP|DNS] [--panel-domain DNS] [--restore mtpctl.db]   мастер" \
     "  bash install.sh update | uninstall                               обновить / удалить мастер" \
-    "  bash install.sh slave --master IP|DNS --port PORT                вход" \
+    "  bash install.sh slave --master IP|DNS --port PORT [--auto-update]   вход" \
+    "  mtpctl-entry [--force]                                            обновить вход" \
     "  bash install.sh slave --uninstall"; exit "${1:-1}"; }
 
 # --------------------------------------------------------------------------- общее
@@ -138,14 +143,65 @@ nginx_apply() {
 
 # --------------------------------------------------------------------------- вход (slave)
 
+raw_installer_url() {   # $1=repo $2=branch
+    local repo="${1%/}" br="${2:-master}"
+    if [[ "$repo" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
+        echo "https://raw.githubusercontent.com/${BASH_REMATCH[1]%.git}/$br/install.sh"
+    else
+        echo "$repo/raw/$br/install.sh"
+    fi
+}
+
+write_entry_files() {   # $1=master $2=port $3=auto(1|"")
+    local url=""
+    # откуда обновляться: явно заданный репозиторий > прежний адрес из конфигурации входа > GitHub по умолчанию
+    [ -z "${MTPCTL_REPO_URL:-}" ] && [ -f "$ENTRY_CONF" ] && url=$(sed -n 's/^INSTALLER_URL=//p' "$ENTRY_CONF")
+    [ -n "$url" ] || url=$(raw_installer_url "$REPO_URL" "${REPO_BRANCH:-master}")
+    umask 077
+    cat > "$ENTRY_CONF" <<EOF
+# mtpctl: вход (install.sh slave). Обновление: mtpctl-entry
+MASTER=$1
+PORT=$2
+SLAVE_VERSION=$SLAVE_VERSION
+INSTALLER_URL=$url
+AUTO_UPDATE=${3:-}
+EOF
+    umask 022
+    cat > "$ENTRY_BIN" <<'EOF'
+#!/bin/bash
+# mtpctl: обновить вход — скачать свежий install.sh и выполнить «slave --update» (переустановит, если версия выросла)
+set -euo pipefail
+. /etc/mtpctl-entry.conf
+tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
+curl -fsSL --retry 3 --max-time 60 "$INSTALLER_URL" -o "$tmp"
+bash -n "$tmp"
+exec bash "$tmp" slave --update "$@"
+EOF
+    chmod 755 "$ENTRY_BIN"
+    if [ -n "${3:-}" ]; then
+        printf '[Unit]\nDescription=mtpctl entry: weekly update check\n\n[Service]\nType=oneshot\nExecStart=%s\n' "$ENTRY_BIN" \
+            > /etc/systemd/system/mtpctl-entry-update.service
+        printf '[Unit]\nDescription=mtpctl entry: weekly update check\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=6h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' \
+            > /etc/systemd/system/mtpctl-entry-update.timer
+        systemctl daemon-reload; systemctl enable --now mtpctl-entry-update.timer >/dev/null 2>&1
+        info "автообновление входа: раз в неделю (mtpctl-entry-update.timer)"
+    elif [ -f /etc/systemd/system/mtpctl-entry-update.timer ]; then
+        systemctl disable --now mtpctl-entry-update.timer >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/mtpctl-entry-update.{timer,service}; systemctl daemon-reload
+    fi
+}
+
 slave() {
-    local master="" port="" force="" uninstall=""
+    local master="" port="" force="" uninstall="" update="" auto="" noauto=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --master) master="${2:-}"; shift 2;;
             --port) port="${2:-}"; shift 2;;
             --force) force=1; shift;;
             --uninstall) uninstall=1; shift;;
+            --update) update=1; shift;;
+            --auto-update) auto=1; shift;;
+            --no-auto-update) noauto=1; shift;;
             -h|--help) usage 0;;
             *) die "неизвестный параметр: $1";;
         esac
@@ -154,9 +210,25 @@ slave() {
     if [ -n "$uninstall" ]; then
         [ -f "$SLAVE_CONF" ] || { ok "вход не установлен"; return; }
         mv "$SLAVE_CONF" "/root/mtproxy.conf.removed-$(date +%Y%m%d%H%M%S)"
+        systemctl disable --now mtpctl-entry-update.timer >/dev/null 2>&1 || true
+        rm -f "$ENTRY_CONF" "$ENTRY_BIN" /etc/systemd/system/mtpctl-entry-update.{timer,service}
+        systemctl daemon-reload
         nginx_apply
         ok "вход удалён (nginx остался; конфиг сохранён в /root)"
         return
+    fi
+    if [ -n "$update" ]; then                    # запускается из свежего install.sh (mtpctl-entry)
+        [ -f "$ENTRY_CONF" ] || die "нет $ENTRY_CONF — переустановите вход командой из кабинета"
+        local cur_master cur_port cur_ver cur_auto
+        cur_master=$(sed -n 's/^MASTER=//p' "$ENTRY_CONF"); cur_port=$(sed -n 's/^PORT=//p' "$ENTRY_CONF")
+        cur_ver=$(sed -n 's/^SLAVE_VERSION=//p' "$ENTRY_CONF"); cur_auto=$(sed -n 's/^AUTO_UPDATE=//p' "$ENTRY_CONF")
+        if [ -z "$force" ] && [ "${cur_ver:-0}" -ge "$SLAVE_VERSION" ] 2>/dev/null; then
+            ok "вход актуален (версия входа $SLAVE_VERSION)"
+            return
+        fi
+        info "обновляю вход: версия ${cur_ver:-?} -> $SLAVE_VERSION"
+        master=$cur_master; port=$cur_port
+        [ -n "$noauto" ] || auto=${auto:-$cur_auto}
     fi
     master="${master,,}"
     [ -n "$master" ] && valid_addr "$master" || die "укажите --master IP или DNS-имя мастера"
@@ -220,7 +292,11 @@ EOF
         ufw allow 443/tcp >/dev/null; ufw allow 80/tcp >/dev/null
         info "ufw: открыты 80 и 443"
     fi
-    ok "вход настроен: 443 -> $master:$port, 80 -> $master:80"
+    local keep_auto=""
+    [ -f "$ENTRY_CONF" ] && keep_auto=$(sed -n 's/^AUTO_UPDATE=//p' "$ENTRY_CONF")
+    [ -n "$noauto" ] && keep_auto=""
+    write_entry_files "$master" "$port" "${auto:-$keep_auto}"
+    ok "вход настроен: 443 -> $master:$port, 80 -> $master:80 (версия входа $SLAVE_VERSION; обновить: mtpctl-entry)"
     if timeout 6 bash -c "exec 3<>/dev/tcp/$master/$port" 2>/dev/null; then
         ok "мастер принимает соединения с этого хоста"
     else
@@ -326,6 +402,7 @@ master() {
         esac
     done
     need_root; detect_os
+    rm -f "$DATA/update.req"                     # заявка из кабинета принята
     [ -z "$restore" ] || [ -f "$restore" ] || die "нет файла $restore"
     [ -z "$restore" ] || restore="$(cd "$(dirname "$restore")" && pwd)/$(basename "$restore")"
     if [ -n "$addr" ]; then addr="${addr,,}"; valid_addr "$addr" || die "--addr: IPv4 или DNS-имя"; fi
@@ -347,7 +424,7 @@ master() {
 
     if [ -n "$restore" ]; then
         if [ -f "$DB" ]; then
-            "$BIN" restore "$restore" -y
+            "$BIN" restore "$restore" -y --access-from-backup
         else
             python3 -I -c "import sys; sys.path.insert(0, '$APP'); import core; core.check_db_file(sys.argv[1])" "$restore" \
                 || die "$restore — не база mtpctl"
@@ -367,9 +444,9 @@ master() {
     fi
     [ -f "$DB" ] || [ -n "$addr" ] || addr=$(public_ip || true)
 
-    systemctl enable --now mtpctl-agent.path mtpctl-agent.timer mtpctl-backup.timer >/dev/null 2>&1
+    systemctl enable --now mtpctl-agent.path mtpctl-agent.timer mtpctl-backup.timer mtpctl-update.path >/dev/null 2>&1
     systemctl enable mtpctl-web >/dev/null 2>&1
-    "$BIN" setup ${addr:+--addr "$addr"} ${pdomain:+--panel-domain "$pdomain"}   # пароль и путь кабинета — как в 3x-ui
+    "$BIN" setup ${addr:+--addr "$addr"} ${pdomain:+--panel-domain "$pdomain"}   # пароль и путь кабинета
     systemctl restart mtpctl-web
     info "применяю конфигурацию (telemt, ufw, nginx, сертификаты)…"
     "$BIN" apply || warn "применилось не всё — подробности выше и в mtpctl server list"
@@ -404,7 +481,7 @@ uninstall_master() {
         python3 -I -c "import sqlite3,sys; s=sqlite3.connect('file:$DB?mode=ro',uri=True); d=sqlite3.connect(sys.argv[1]); s.backup(d)" "$keep"
         chmod 600 "$keep"
     fi
-    for u in mtpctl-web mtpctl-agent.path mtpctl-agent.timer mtpctl-agent mtpctl-backup.timer; do
+    for u in mtpctl-web mtpctl-agent.path mtpctl-agent.timer mtpctl-agent mtpctl-backup.timer mtpctl-update.path; do
         systemctl disable --now "$u" >/dev/null 2>&1 || true
     done
     for u in $(systemctl list-units 'telemt@*' --all --no-legend --plain 2>/dev/null | awk '{print $1}'); do

@@ -67,7 +67,7 @@ chk "конфиг telemt: доверяет только входу" x m1 "grep -
 chk "nginx: сайт $D с временным сертификатом" x m1 "grep -q mtpctl-fallback.crt /etc/nginx/conf.d/mtp-$D.conf"
 chk "nginx: маскировка ya.ru" x m1 "grep -q 'ya.ru ya.ru:443' /etc/nginx/stream.d/mtp-mask.conf"
 chk "nginx: кабинет на /$BASE/" x m1 "grep -q 'location /$BASE/api/' /etc/nginx/snippets/mtpanel.conf"
-chk "команда для входа показана" grep -q "install.sh slave --master $M1 --port 8443" /tmp/mtpctl-e2e-add.log
+chk "команда для входа показана" grep -q "install.sh) slave --master $M1 --port 8443" /tmp/mtpctl-e2e-add.log
 x m1 'mtpctl backup' >/dev/null 2>&1 && x m1 '[ "$(stat -c %a /opt/mtpctl/backup/mtpctl.db)" = 600 ]' \
     && ok "рабочая копия /opt/mtpctl/backup/mtpctl.db (600)" || bad "рабочая копия"
 chk "копия одна" x m1 '[ "$(ls /opt/mtpctl/backup | wc -l)" = 1 ]'
@@ -125,6 +125,51 @@ chk "домен кабинета: прочие адреса — стандарт
 x m1 "mtpctl settings --panel-domain ''" >/dev/null 2>&1
 chk "домен кабинета снят — кабинет снова на доменах серверов" test "$(code_of /$BASE/ 200)" = 200
 x m1 'mtpctl backup /root/b.db' >/dev/null && ok "backup в файл" || bad "backup в файл"
+
+echo "--- обновление мастера кнопкой в кабинете (новая версия в «GitHub»)"
+cat > /tmp/mtpctl-e2e-c2.sh <<'EOS'
+set -e
+D=$1; IP=$2; PW=$3; B=$4; ACT=$5; F=${6:-}
+C="curl -sk --resolve $D:443:$IP -H X-Requested-With:XMLHttpRequest -c /tmp/j2 -b /tmp/j2"
+$C -H Content-Type:application/json -d "{\"password\":\"$PW\"}" https://$D/$B/api/login | grep -q '"ok": true' && echo LOGIN
+case $ACT in
+  update)  $C "https://$D/$B/api/version?check=1" | grep -q '"update": true' && echo AVAILABLE
+           $C -X POST https://$D/$B/api/update | grep -q '"ok": true' && echo STARTED;;
+  restore) $C -H Content-Type:application/octet-stream --data-binary @$F "https://$D/$B/api/restore?keep_access=1" | grep -q '"ok": true' && echo UPLOADED;;
+esac
+EOS
+docker cp /tmp/mtpctl-e2e-c2.sh e1:/root/c2.sh >/dev/null
+x m1 "echo MTP_TELEMT_BIN=/src/tests/fake_telemt.py > /etc/default/mtpctl"
+x m1 'cd /root && echo 9.9.9 > mtpctl-master/VERSION && tar czf gh/archive/refs/heads/master.tar.gz mtpctl-master \
+      && mkdir -p gh/raw/master && cp mtpctl-master/VERSION mtpctl-master/install.sh gh/raw/master/'
+R=$(x e1 "bash /root/c2.sh $D $E1 '$PW' '$BASE' update" 2>&1)
+for k in AVAILABLE STARTED; do case " $(echo $R) " in *" $k "*) ok "обновление: $k";; *) bad "обновление: $k ($R)";; esac; done
+x m1 'for i in $(seq 150); do [ "$(cat /opt/mtpctl/app/VERSION)" = 9.9.9 ] && ! systemctl is-active -q mtpctl-update && systemctl is-active -q mtpctl-web && exit 0; sleep 2; done; exit 1' \
+    && ok "мастер обновился до 9.9.9 сам (mtpctl-update.service)" || { bad "мастер не обновился"; x m1 'journalctl -u mtpctl-update --no-pager | tail -15'; }
+chk "после обновления: данные и прокси на месте" x m1 'mtpctl client show e2e | grep -q "tg://proxy" && systemctl is-active -q telemt@s1'
+chk "после обновления: заявка убрана" x m1 '[ ! -f /opt/mtpctl/data/update.req ]'
+
+echo "--- восстановление базы загрузкой копии через кабинет"
+x m1 'mtpctl backup /root/r.db >/dev/null && mtpctl client delete e2e -y >/dev/null' && ok "клиент e2e удалён" || bad "удаление e2e"
+docker cp m1:/root/r.db /tmp/mtpctl-e2e-r.db >/dev/null && docker cp /tmp/mtpctl-e2e-r.db e1:/root/r.db >/dev/null
+R=$(x e1 "bash /root/c2.sh $D $E1 '$PW' '$BASE' restore /root/r.db" 2>&1)
+case " $(echo $R) " in *" UPLOADED "*) ok "копия загружена";; *) bad "загрузка копии ($R)";; esac
+x m1 'for i in $(seq 60); do mtpctl client show e2e >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1' \
+    && ok "база восстановлена агентом: клиент e2e вернулся" || bad "база не восстановилась"
+R=$(x e1 "sleep 3; bash /root/c2.sh $D $E1 '$PW' '$BASE' none" 2>&1)
+case " $(echo $R) " in *" LOGIN "*) ok "после восстановления вход прежним паролем";; *) bad "вход после восстановления ($R)";; esac
+chk "прежняя база сохранена" x m1 'ls /opt/mtpctl/backup/mtpctl.db.before-restore-*'
+
+echo "--- обновление входа (mtpctl-entry)"
+x e1 "MTPCTL_REPO_URL=http://$M1:8000 bash /src/install.sh slave --master $M1 --port 8443 --auto-update" >/dev/null 2>&1 \
+    && ok "вход с --auto-update" || bad "вход с --auto-update"
+chk "таймер автообновления входа включён" x e1 'systemctl is-enabled -q mtpctl-entry-update.timer'
+chk "параметры входа сохранены" x e1 "grep -q '^INSTALLER_URL=http://$M1:8000/raw/master/install.sh' /etc/mtpctl-entry.conf"
+chk "mtpctl-entry: версия та же — не трогает" test "$(x e1 'mtpctl-entry 2>&1 | grep -c "вход актуален"')" = 1
+x m1 "sed -i 's/^SLAVE_VERSION=1 /SLAVE_VERSION=2 /' /root/gh/raw/master/install.sh"
+chk "mtpctl-entry: новая версия входа — переустановка" test "$(x e1 'mtpctl-entry 2>&1 | grep -c "обновляю вход: версия 1 -> 2"')" = 1
+chk "mtpctl-entry: после обновления — актуален" test "$(x e1 'mtpctl-entry 2>&1 | grep -c "вход актуален"')" = 1
+chk "вход после обновления работает" test "$(code_of /$BASE/ 200)" = 200
 
 echo "--- переезд мастера на m2 (с ufw)"
 docker cp m1:/root/b.db /tmp/mtpctl-e2e-b.db >/dev/null && docker cp /tmp/mtpctl-e2e-b.db m2:/root/b.db >/dev/null
